@@ -850,6 +850,7 @@ done:
 static void
 service_dump(struct service const * const s, struct blob_buf * const b)
 {
+    struct service_config const * const config = &s->config;
     void * const cookie = blobmsg_open_table(b, s->name);
 
     /* Dump some state. */
@@ -866,18 +867,18 @@ service_dump(struct service const * const s, struct blob_buf * const b)
     }
 
     /* Dump some of the configuration so it's possible to check it. */
-    blobmsg_add_blob(b, s->config.command);
-    if (s->config.reload_command != NULL)
+    blobmsg_add_blob(b, config->command);
+    if (config->reload_command != NULL)
     {
-        blobmsg_add_blob(b, s->config.reload_command);
+        blobmsg_add_blob(b, config->reload_command);
     }
-    blobmsg_add_u32(b, terminate_timeout_millisecs_, s->config.terminate_timeout_millisecs);
-    blobmsg_add_u8(b, log_stdout_, s->config.log_stdout);
-    blobmsg_add_u8(b, log_stderr_, s->config.log_stderr);
-    blobmsg_add_u8(b, new_session_, s->config.create_new_session);
-    if (s->config.pid_filename != NULL)
+    blobmsg_add_u32(b, terminate_timeout_millisecs_, config->terminate_timeout_millisecs);
+    blobmsg_add_u8(b, log_stdout_, config->log_stdout);
+    blobmsg_add_u8(b, log_stderr_, config->log_stderr);
+    blobmsg_add_u8(b, new_session_, config->create_new_session);
+    if (config->pid_filename != NULL)
     {
-        blobmsg_add_string(b, pid_file_, s->config.pid_filename);
+        blobmsg_add_string(b, pid_file_, config->pid_filename);
     }
 
     blobmsg_close_table(b, cookie);
