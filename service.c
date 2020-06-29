@@ -72,7 +72,7 @@ service_alloc(char const * const service_name)
 {
     char * name;
     struct service * const s =
-        calloc_a(sizeof *s,&name, strlen(service_name) + 1);
+        calloc_a(sizeof *s, &name, strlen(service_name) + 1);
 
     strcpy(name, service_name);
     s->name = name;
@@ -299,15 +299,15 @@ service_send_signal(struct service const * const s, unsigned const sig)
 
     switch (errno)
     {
-        case EINVAL:
-            res = UBUS_STATUS_INVALID_ARGUMENT;
-            goto done;
-        case EPERM:
-            res = UBUS_STATUS_PERMISSION_DENIED;
-            goto done;
-        case ESRCH:
-            res = UBUS_STATUS_NOT_FOUND;
-            goto done;
+    case EINVAL:
+        res = UBUS_STATUS_INVALID_ARGUMENT;
+        goto done;
+    case EPERM:
+        res = UBUS_STATUS_PERMISSION_DENIED;
+        goto done;
+    case ESRCH:
+        res = UBUS_STATUS_NOT_FOUND;
+        goto done;
     }
 
     res = UBUS_STATUS_UNKNOWN_ERROR;
@@ -321,15 +321,27 @@ service_reload(struct service * const s, struct blob_attr * const msg)
 {
     if (process_is_running(&s->proc))
     {
-        debug("%s needs reload support\n", __func__);
         if (s->config.reload_signal != 0)
         {
             service_send_signal(s, s->config.reload_signal);
         }
+        else
+        {
+            /*
+             * The service doesn't support reload via a signal, so it must
+             * be restarted instead.
+             * There may be other ways to signal the service to reload it config
+             * (e.g. ubus call), so this should be considered as well
+             * (e.g. a second command?)
+             */
+            s->restart_after_exit = true;
+            service_stop(s);
+        }
     }
     else
     {
-        debug("Can't reload config as service %s not running", s->name);
+        /* The service isnt' running, so may as well just start it. */
+        service_start(s);
     }
 }
 
@@ -366,8 +378,7 @@ stderr_reader(struct ustream * const s, int const bytes)
         debug("%s", buf);
         /* Log it? */
         ustream_consume(s, len);
-    }
-    while (1);
+    } while (1);
 }
 
 static void
@@ -397,8 +408,7 @@ stdout_reader(struct ustream * const s, int const bytes)
 #endif
         /* Log it? */
         ustream_consume(s, len);
-    }
-    while (1);
+    } while (1);
 }
 
 static void
@@ -494,8 +504,7 @@ service_init(struct service * const s, struct ubus_context * const ubus)
     s->stderr.stream.notify_read = stderr_reader;
 }
 
-enum
-{
+enum {
     SERVICE_CONFIG_COMMAND,
     SERVICE_CONFIG_STDOUT,
     SERVICE_CONFIG_STDERR,
@@ -555,7 +564,7 @@ parse_config(struct service_config * const config, struct blob_attr * const msg)
 
     config->terminate_timeout_millisecs =
         blobmsg_get_u32_or_default(
-        tb[SERVICE_CONFIG_TERMTIMEOUT], default_terminate_timeout_millisecs);
+            tb[SERVICE_CONFIG_TERMTIMEOUT], default_terminate_timeout_millisecs);
     config->reload_signal =
         blobmsg_get_u32_or_default(tb[SERVICE_CONFIG_RELOADSIG], 0);
     if (tb[SERVICE_CONFIG_PIDFILE])
@@ -576,8 +585,7 @@ done:
     return success;
 }
 
-enum
-{
+enum {
     SERVICE_ADD_NAME,
     SERVICE_ADD_AUTO_START,
     __SERVICE_ADD_MAX,
@@ -680,8 +688,7 @@ handle_request_method(
     }
 }
 
-enum
-{
+enum {
     SERVICE_START_STOP_NAME,
     __SERVICE_START_STOP_MAX
 };
@@ -729,8 +736,7 @@ done:
     return result;
 }
 
-enum
-{
+enum {
     SERVICE_SIGNAL_NAME,
     SERVICE_SIGNAL_SIGNAL,
     __SERVICE_SIGNAL_MAX,
@@ -813,8 +819,7 @@ service_dump(struct service const * const s, struct blob_buf * const b)
     blobmsg_close_table(b, cookie);
 }
 
-struct dump_context
-{
+struct dump_context {
     struct blob_buf * b;
     char const * service_name;
 };
@@ -845,8 +850,7 @@ service_dump_populate(
     services_iterate(ubus, service_dump_cb, &ctx);
 }
 
-enum
-{
+enum {
     SERVICE_DUMP_NAME,
     __SERVICE_DUMP_MAX,
 };
