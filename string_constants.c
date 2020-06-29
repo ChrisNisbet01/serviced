@@ -17,6 +17,7 @@ char const dump_[] = "dump";
 
 char const name_[] = "name";
 char const command_[] = "command";
+char const reload_command_[] = "reload_command";
 char const stdout_[] = "stdout";
 char const stderr_[] = "stderr";
 char const pid_file_[] = "pid_file";

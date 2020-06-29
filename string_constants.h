@@ -17,6 +17,7 @@ extern char const dump_[];
 
 extern char const name_[];
 extern char const command_[];
+extern char const reload_command_[];
 extern char const stdout_[];
 extern char const stderr_[];
 extern char const pid_file_[];

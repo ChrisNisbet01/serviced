@@ -45,6 +45,8 @@ config_free(struct service_config * const config)
     config->pid_filename = NULL;
     free(config->command);
     config->command = NULL;
+    free(config->reload_command);
+    config->reload_command = NULL;
 }
 
 static void
@@ -143,7 +145,7 @@ service_run(struct service * const s, int const stdout_fd, int const stderr_fd)
     redirect_file(stdout_fd, STDOUT_FILENO, O_WRONLY);
     redirect_file(stderr_fd, STDERR_FILENO, O_WRONLY);
 
-    char * * argv = command_array_to_args(s->config.command);
+    char * * const argv = command_array_to_args(s->config.command);
 
     execvp(argv[0], argv);
     exit(-1);
@@ -173,13 +175,13 @@ initialise_pipe(int * const pipe_fd, bool const will_read_pipe)
     }
 }
 
-static void
+static bool
 service_start(struct service * const s)
 {
     if (process_is_running(&s->proc))
     {
         debug("Service %s is already running\n", s->name);
-        return;
+        goto done;
     }
 
     close_output_streams(s);
@@ -234,19 +236,32 @@ service_start(struct service * const s)
     send_service_event(s->ubus, s->name, service_has_started_);
 
 done:
-    return;
+    return true;
 }
 
-static void
+static bool
 service_stop(struct service * const s)
 {
+    bool success;
+
     if (process_is_running(&s->proc))
     {
         stop_running_process(s);
+        success = true;
     }
+    else
+    {
+        /*
+         * Return an error so the caller can identify if the service was
+         * running or not when the stop request was received.
+         */
+        success = false;
+    }
+
+    return success;
 }
 
-static void
+static bool
 service_restart(struct service * const s)
 {
     if (process_is_running(&s->proc))
@@ -258,9 +273,12 @@ service_restart(struct service * const s)
     {
         service_start(s);
     }
+
+    return true;
+
 }
 
-static void
+static bool
 service_delete(struct service * const s)
 {
     /*
@@ -277,6 +295,8 @@ service_delete(struct service * const s)
         send_service_event(s->ubus, s->name, service_deleted_);
         service_free(s);
     }
+
+    return true;
 }
 
 static int
@@ -316,7 +336,7 @@ done:
     return res;
 }
 
-static void
+static bool
 service_reload(struct service * const s, struct blob_attr * const msg)
 {
     if (process_is_running(&s->proc))
@@ -325,14 +345,23 @@ service_reload(struct service * const s, struct blob_attr * const msg)
         {
             service_send_signal(s, s->config.reload_signal);
         }
+        else if (s->config.reload_command != NULL)
+        {
+            debug("need reload command support\n");
+            /*
+             * Run this command to get the service config reloaded.
+             * An example of the command to run might be something like a
+             * ubus call service reload.
+             */
+            /* Temp debug, just restart the service. */
+            s->restart_after_exit = true;
+            service_stop(s);
+        }
         else
         {
             /*
-             * The service doesn't support reload via a signal, so it must
-             * be restarted instead.
-             * There may be other ways to signal the service to reload it config
-             * (e.g. ubus call), so this should be considered as well
-             * (e.g. a second command?)
+             * The service doesn't support reload via a signal or command, so
+             * it must be restarted instead.
              */
             s->restart_after_exit = true;
             service_stop(s);
@@ -343,6 +372,8 @@ service_reload(struct service * const s, struct blob_attr * const msg)
         /* The service isnt' running, so may as well just start it. */
         service_start(s);
     }
+
+    return true;
 }
 
 static void
@@ -488,7 +519,7 @@ service_has_exited(struct uloop_process * p, int exit_code)
 static void
 service_init(struct service * const s, struct ubus_context * const ubus)
 {
-    debug("%s", __func__);
+    debug("%s\n", __func__);
     s->ubus = ubus;
 
     s->timeout.cb = service_timeout;
@@ -506,6 +537,7 @@ service_init(struct service * const s, struct ubus_context * const ubus)
 
 enum {
     SERVICE_CONFIG_COMMAND,
+    SERVICE_CONFIG_RELOAD_COMMAND,
     SERVICE_CONFIG_STDOUT,
     SERVICE_CONFIG_STDERR,
     SERVICE_CONFIG_PIDFILE,
@@ -517,6 +549,7 @@ enum {
 
 static const struct blobmsg_policy service_config_policy[__SERVICE_CONFIG_MAX] = {
     [SERVICE_CONFIG_COMMAND] = { command_, BLOBMSG_TYPE_ARRAY },
+    [SERVICE_CONFIG_RELOAD_COMMAND] = { reload_command_, BLOBMSG_TYPE_ARRAY },
     [SERVICE_CONFIG_STDOUT] = { stdout_, BLOBMSG_TYPE_BOOL },
     [SERVICE_CONFIG_STDERR] = { stderr_, BLOBMSG_TYPE_BOOL },
     [SERVICE_CONFIG_PIDFILE] = { pid_file_, BLOBMSG_TYPE_STRING },
@@ -560,6 +593,20 @@ parse_config(struct service_config * const config, struct blob_attr * const msg)
     {
         success = false;
         goto done;
+    }
+
+    /*
+     * The reload command is optional, so check that the user has supplied one
+     * first.
+     */
+    if (tb[SERVICE_CONFIG_RELOAD_COMMAND])
+    {
+        config->reload_command = parse_command(tb[SERVICE_CONFIG_RELOAD_COMMAND]);
+        if (config->reload_command == NULL)
+        {
+            success = false;
+            goto done;
+        }
     }
 
     config->terminate_timeout_millisecs =
@@ -660,32 +707,41 @@ done:
     return result;
 }
 
-static void
+static bool
 handle_request_method(
     struct service * const s,
     char const * const method,
     struct blob_attr * const msg)
 {
+    bool success;
+
+    /* FIXME: Not keen on this long if/else if chain. */
     if (strcmp(method, start_) == 0)
     {
-        service_start(s);
+        success = service_start(s);
     }
     else if (strcmp(method, stop_) == 0)
     {
-        service_stop(s);
+        success = service_stop(s);
     }
     else if (strcmp(method, restart_) == 0)
     {
-        service_restart(s);
+        success = service_restart(s);
     }
     else if (strcmp(method, delete_) == 0)
     {
-        service_delete(s);
+        success = service_delete(s);
     }
     else if (strcmp(method, reload_) == 0)
     {
-        service_reload(s, msg);
+        success = service_reload(s, msg);
     }
+    else
+    {
+        success = false;
+    }
+
+    return success;
 }
 
 enum {
@@ -728,7 +784,11 @@ service_handle_start_stop_restart_request(
         goto done;
     }
 
-    handle_request_method(s, method, msg);
+    if (!handle_request_method(s, method, msg))
+    {
+        result = UBUS_STATUS_INVALID_ARGUMENT;
+        goto done;
+    }
 
     result = UBUS_STATUS_OK;
 
@@ -807,6 +867,10 @@ service_dump(struct service const * const s, struct blob_buf * const b)
 
     /* Dump some of the configuration so it's possible to check it. */
     blobmsg_add_blob(b, s->config.command);
+    if (s->config.reload_command != NULL)
+    {
+        blobmsg_add_blob(b, s->config.reload_command);
+    }
     blobmsg_add_u32(b, terminate_timeout_millisecs_, s->config.terminate_timeout_millisecs);
     blobmsg_add_u8(b, log_stdout_, s->config.log_stdout);
     blobmsg_add_u8(b, log_stderr_, s->config.log_stderr);
