@@ -7,6 +7,7 @@ extern char const service_added_[];
 extern char const service_[];
 
 extern char const add_[];
+extern char const update_[];
 extern char const delete_[];
 extern char const start_[];
 extern char const stop_[];

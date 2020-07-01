@@ -7,6 +7,7 @@ char const service_added_[] = "service.added";
 char const service_[] = "service";
 
 char const add_[] = "add";
+char const update_[] = "update";
 char const delete_[] = "delete";
 char const start_[] = "start";
 char const stop_[] = "stop";

@@ -20,6 +20,24 @@ process_is_running(struct uloop_process const * const process)
     return process->pending;
 }
 
+static bool
+service_is_running(struct service const * const s)
+{
+    return process_is_running(&s->proc);
+}
+
+static inline bool
+timer_is_running(struct uloop_timeout const * const timer)
+{
+    return timer->pending;
+}
+
+static inline bool
+service_is_stopping(struct service const * const s)
+{
+    return timer_is_running(&s->timeout);
+}
+
 static void
 close_output_stream(struct ustream_fd * const stream)
 {
@@ -39,14 +57,26 @@ close_output_streams(struct service * const s)
 }
 
 static void
-config_free(struct service_config * const config)
+config_free(struct service_config const * const config_in)
 {
+    if (config_in == NULL)
+    {
+        goto done;
+    }
+
+    struct service_config * const config = UNCONST(config_in);
+
     free(config->pid_filename);
     config->pid_filename = NULL;
     free(config->command);
     config->command = NULL;
     free(config->reload_command);
     config->reload_command = NULL;
+
+    free(config);
+
+done:
+    return;
 }
 
 static void
@@ -61,7 +91,8 @@ service_free(struct service * const s)
     close_output_streams(s);
     uloop_process_delete(&s->proc);
     uloop_timeout_cancel(&s->timeout);
-    config_free(&s->config);
+    config_free(s->config);
+    config_free(s->next_config);
 
     free(s);
 
@@ -96,7 +127,10 @@ static void
 stop_running_process(struct service * const s)
 {
     send_signal_to_process(&s->proc, SIGTERM);
-    uloop_timeout_set(&s->timeout, s->config.terminate_timeout_millisecs);
+
+    struct service_config const * const config = s->config;
+
+    uloop_timeout_set(&s->timeout, config->terminate_timeout_millisecs);
 }
 
 static char * *
@@ -134,8 +168,9 @@ static void
 service_run(struct service * const s, int const stdout_fd, int const stderr_fd)
 {
     /* This is called by the child process. */
+    struct service_config const * const config = s->config;
 
-    if (s->config.create_new_session)
+    if (config->create_new_session)
     {
         debug("Service %s running in new session\n", s->name);
         setsid();
@@ -145,7 +180,7 @@ service_run(struct service * const s, int const stdout_fd, int const stderr_fd)
     redirect_file(stdout_fd, STDOUT_FILENO, O_WRONLY);
     redirect_file(stderr_fd, STDERR_FILENO, O_WRONLY);
 
-    char * * const argv = command_array_to_args(s->config.command);
+    char * * const argv = command_array_to_args(config->command);
 
     execvp(argv[0], argv);
     exit(-1);
@@ -178,7 +213,9 @@ initialise_pipe(int * const pipe_fd, bool const will_read_pipe)
 static bool
 service_start(struct service * const s)
 {
-    if (process_is_running(&s->proc))
+    struct service_config const * const config = s->config;
+
+    if (service_is_running(s))
     {
         debug("Service %s is already running\n", s->name);
         goto done;
@@ -189,8 +226,8 @@ service_start(struct service * const s)
     int stdout_pipe[2];
     int stderr_pipe[2];
 
-    initialise_pipe(stdout_pipe, s->config.log_stdout);
-    initialise_pipe(stderr_pipe, s->config.log_stderr);
+    initialise_pipe(stdout_pipe, config->log_stdout);
+    initialise_pipe(stderr_pipe, config->log_stderr);
 
     pid_t const pid = fork();
 
@@ -215,7 +252,7 @@ service_start(struct service * const s)
     debug("Started service %s, PID %d\n", s->name, (int)pid);
 
     s->proc.pid = pid;
-    write_pid_file(s->config.pid_filename, s->proc.pid);
+    write_pid_file(config->pid_filename, s->proc.pid);
 
     clock_gettime(CLOCK_MONOTONIC, &s->start_timestamp);
 
@@ -244,9 +281,12 @@ service_stop(struct service * const s)
 {
     bool success;
 
-    if (process_is_running(&s->proc))
+    if (service_is_running(s))
     {
-        stop_running_process(s);
+        if (!service_is_stopping(s))
+        {
+            stop_running_process(s);
+        }
         success = true;
     }
     else
@@ -264,7 +304,7 @@ service_stop(struct service * const s)
 static bool
 service_restart(struct service * const s)
 {
-    if (process_is_running(&s->proc))
+    if (service_is_running(s))
     {
         s->restart_after_exit = true;
         stop_running_process(s);
@@ -285,7 +325,7 @@ service_delete(struct service * const s)
      * Service must be stopped before it be deleted. The process exit handler
      * will call this function again once the process exits.
      */
-    if (process_is_running(&s->proc))
+    if (service_is_running(s))
     {
         s->delete_after_exit = true;
         service_stop(s);
@@ -304,7 +344,7 @@ service_send_signal(struct service const * const s, unsigned const sig)
 {
     int res;
 
-    if (!process_is_running(&s->proc))
+    if (!service_is_running(s))
     {
         debug("Service %s not running. can't send signal\n", s->name);
         res = UBUS_STATUS_OK;
@@ -337,15 +377,17 @@ done:
 }
 
 static bool
-service_reload(struct service * const s, struct blob_attr * const msg)
+service_reload(struct service * const s)
 {
-    if (process_is_running(&s->proc))
+    if (service_is_running(s))
     {
-        if (s->config.reload_signal != 0)
+        struct service_config const * const config = s->config;
+
+        if (config->reload_signal != 0)
         {
-            service_send_signal(s, s->config.reload_signal);
+            service_send_signal(s, config->reload_signal);
         }
-        else if (s->config.reload_command != NULL)
+        else if (config->reload_command != NULL)
         {
             debug("need reload command support\n");
             /*
@@ -369,11 +411,260 @@ service_reload(struct service * const s, struct blob_attr * const msg)
     }
     else
     {
-        /* The service isnt' running, so may as well just start it. */
+        /*
+         * The service isn't running, so may as well just start it.
+         * If the callers wants to reload the config, surely he expects it to
+         * be running.
+         */
         service_start(s);
     }
 
     return true;
+}
+
+static bool
+commands_match(struct blob_attr const * const a, struct blob_attr const * const b)
+{
+    return blob_attr_equal(a, b);
+}
+
+static bool
+configs_match(
+    struct service_config const * const a, struct service_config const * b)
+{
+    bool match;
+
+    if (!commands_match(a->command, b->command))
+    {
+        match = false;
+        goto done;
+    }
+    if (!commands_match(a->reload_command, b->reload_command))
+    {
+        match = false;
+        goto done;
+    }
+
+    if (((a->pid_filename == NULL) ^ (b->pid_filename == NULL))
+        || (a->pid_filename != NULL && strcmp(a->pid_filename, b->pid_filename) != 0))
+    {
+        match = false;
+        goto done;
+    }
+    if (a->terminate_timeout_millisecs != b->terminate_timeout_millisecs)
+    {
+        match = false;
+        goto done;
+    }
+    if (a->log_stdout != b->log_stdout)
+    {
+        match = false;
+        goto done;
+    }
+    if (a->log_stderr != b->log_stderr)
+    {
+        match = false;
+        goto done;
+    }
+    if (a->create_new_session != b->create_new_session)
+    {
+        match = false;
+        goto done;
+    }
+    if (a->reload_signal != b->reload_signal)
+    {
+        match = false;
+        goto done;
+    }
+
+    match = true;
+
+done:
+    return match;
+}
+
+enum {
+    SERVICE_CONFIG_COMMAND,
+    SERVICE_CONFIG_RELOAD_COMMAND,
+    SERVICE_CONFIG_STDOUT,
+    SERVICE_CONFIG_STDERR,
+    SERVICE_CONFIG_PIDFILE,
+    SERVICE_CONFIG_RELOADSIG,
+    SERVICE_CONFIG_TERMTIMEOUT,
+    SERVICE_CONFIG_NEW_SESSION,
+    __SERVICE_CONFIG_MAX,
+};
+
+static const struct blobmsg_policy service_config_policy[__SERVICE_CONFIG_MAX] = {
+    [SERVICE_CONFIG_COMMAND] = { command_, BLOBMSG_TYPE_ARRAY },
+    [SERVICE_CONFIG_RELOAD_COMMAND] = { reload_command_, BLOBMSG_TYPE_ARRAY },
+    [SERVICE_CONFIG_STDOUT] = { stdout_, BLOBMSG_TYPE_BOOL },
+    [SERVICE_CONFIG_STDERR] = { stderr_, BLOBMSG_TYPE_BOOL },
+    [SERVICE_CONFIG_PIDFILE] = { pid_file_, BLOBMSG_TYPE_STRING },
+    [SERVICE_CONFIG_RELOADSIG] = { reload_signal_, BLOBMSG_TYPE_INT32 },
+    [SERVICE_CONFIG_TERMTIMEOUT] = { terminate_timeout_millisecs_, BLOBMSG_TYPE_INT32 },
+    [SERVICE_CONFIG_NEW_SESSION] = { new_session_, BLOBMSG_TYPE_BOOL }
+};
+
+static struct blob_attr *
+parse_command(struct blob_attr * const attr)
+{
+    struct blob_attr * command;
+
+    debug("%s\n", __func__);
+
+    if (blobmsg_array_is_type(attr, BLOBMSG_TYPE_STRING))
+    {
+        command = blob_memdup(attr);
+    }
+    else
+    {
+        command = NULL;
+    }
+
+    return command;
+}
+
+static struct service_config const *
+parse_config(struct blob_attr * const msg)
+{
+    bool success;
+    struct service_config * config = calloc(1, sizeof *config);
+
+    debug("%s\n", __func__);
+
+    if (config == NULL)
+    {
+        success = false;
+        goto done;
+    }
+
+    struct blob_attr * tb[__SERVICE_CONFIG_MAX];
+
+    blobmsg_parse(service_config_policy, __SERVICE_CONFIG_MAX, tb,
+                  blobmsg_data(msg), blobmsg_data_len(msg));
+
+    config->command = parse_command(tb[SERVICE_CONFIG_COMMAND]);
+    if (config->command == NULL)
+    {
+        success = false;
+        goto done;
+    }
+
+    /*
+     * The reload command is optional, so check that the user has supplied one
+     * first.
+     */
+    if (tb[SERVICE_CONFIG_RELOAD_COMMAND])
+    {
+        config->reload_command = parse_command(tb[SERVICE_CONFIG_RELOAD_COMMAND]);
+        if (config->reload_command == NULL)
+        {
+            success = false;
+            goto done;
+        }
+    }
+
+    config->terminate_timeout_millisecs =
+        blobmsg_get_u32_or_default(
+            tb[SERVICE_CONFIG_TERMTIMEOUT], default_terminate_timeout_millisecs);
+    config->reload_signal =
+        blobmsg_get_u32_or_default(tb[SERVICE_CONFIG_RELOADSIG], 0);
+    if (tb[SERVICE_CONFIG_PIDFILE])
+    {
+        config->pid_filename =
+            strdup(blobmsg_get_string(tb[SERVICE_CONFIG_PIDFILE]));
+    }
+    config->log_stdout =
+        blobmsg_get_bool_or_default(tb[SERVICE_CONFIG_STDOUT], false);
+    config->log_stderr =
+        blobmsg_get_bool_or_default(tb[SERVICE_CONFIG_STDERR], false);
+    config->create_new_session =
+        blobmsg_get_bool_or_default(tb[SERVICE_CONFIG_NEW_SESSION], false);
+
+    success = true;
+
+done:
+    if (!success)
+    {
+        debug("config parse failed\n");
+        config_free(config);
+        config = NULL;
+    }
+
+    return config;
+}
+
+static void service_update_config(struct service * const s)
+{
+    if (s->next_config != NULL)
+    {
+        config_free(s->config);
+        s->config = s->next_config;
+        s->next_config = NULL;
+    }
+}
+
+static bool
+service_update(struct service * const s, struct blob_attr * const msg)
+{
+    bool success;
+    struct service_config const * const new_config = parse_config(msg);
+
+    debug("%s\n", __func__);
+
+    if (new_config == NULL)
+    {
+        debug("Invalid config for service %s\n", s->name);
+        success = false;
+        goto done;
+    }
+
+    if (s->next_config != NULL && configs_match(new_config, s->next_config))
+    {
+        /*
+         * Managed to send an updated config that matches the pending one
+         * before the service stopped.
+         * Nothing to do.
+         */
+        debug("new config matches pending config. Nothing to do.\n");
+        config_free(new_config);
+        success = true;
+        goto done;
+    }
+
+    if (configs_match(new_config, s->config))
+    {
+        /* This config matches the current one.
+         * Nothing to do.
+         */
+        debug("new config matches current config. Nothing to do.\n");
+        config_free(new_config);
+        success = true;
+        goto done;
+    }
+
+    config_free(s->next_config);
+    s->next_config = new_config;
+
+    if (service_is_running(s))
+    {
+        if (!service_is_stopping(s))
+        {
+            /* The new config will be applied after the service has stopped. */
+            service_restart(s);
+        }
+    }
+    else
+    {
+        /* Can simply replace the configs now. */
+        service_update_config(s);
+    }
+
+    success = true;
+
+done:
+    return success;
 }
 
 static void
@@ -386,10 +677,14 @@ service_has_stopped(struct service * const s)
         service_delete(s);
         /* s will be invalid at this point if it has been deleted. */
     }
-    else if (s->restart_after_exit)
+    else
     {
-        s->restart_after_exit = false;
-        service_start(s);
+        service_update_config(s);
+        if (s->restart_after_exit)
+        {
+            s->restart_after_exit = false;
+            service_start(s);
+        }
     }
 }
 
@@ -499,6 +794,7 @@ service_has_exited(struct uloop_process * p, int exit_code)
 {
     struct service * const s =
         container_of(p, struct service, proc);
+    struct service_config const * const config = s->config;
     uint32_t const runtime_seconds = service_runtime_seconds(s);
 
     debug("Service %s exited with error code %d after %" PRIu32 " seconds\n",
@@ -508,7 +804,7 @@ service_has_exited(struct uloop_process * p, int exit_code)
     s->last_runtime_seconds = runtime_seconds;
 
     uloop_timeout_cancel(&s->timeout);
-    remove_pid_file(s->config.pid_filename);
+    remove_pid_file(config->pid_filename);
     service_has_stopped(s);
     /*
      * 's' may be invalid after this call if was deleted once the process
@@ -533,103 +829,6 @@ service_init(struct service * const s, struct ubus_context * const ubus)
     s->stderr.fd.fd = -1;
     s->stderr.stream.string_data = true;
     s->stderr.stream.notify_read = stderr_reader;
-}
-
-enum {
-    SERVICE_CONFIG_COMMAND,
-    SERVICE_CONFIG_RELOAD_COMMAND,
-    SERVICE_CONFIG_STDOUT,
-    SERVICE_CONFIG_STDERR,
-    SERVICE_CONFIG_PIDFILE,
-    SERVICE_CONFIG_RELOADSIG,
-    SERVICE_CONFIG_TERMTIMEOUT,
-    SERVICE_CONFIG_NEW_SESSION,
-    __SERVICE_CONFIG_MAX,
-};
-
-static const struct blobmsg_policy service_config_policy[__SERVICE_CONFIG_MAX] = {
-    [SERVICE_CONFIG_COMMAND] = { command_, BLOBMSG_TYPE_ARRAY },
-    [SERVICE_CONFIG_RELOAD_COMMAND] = { reload_command_, BLOBMSG_TYPE_ARRAY },
-    [SERVICE_CONFIG_STDOUT] = { stdout_, BLOBMSG_TYPE_BOOL },
-    [SERVICE_CONFIG_STDERR] = { stderr_, BLOBMSG_TYPE_BOOL },
-    [SERVICE_CONFIG_PIDFILE] = { pid_file_, BLOBMSG_TYPE_STRING },
-    [SERVICE_CONFIG_RELOADSIG] = { reload_signal_, BLOBMSG_TYPE_INT32 },
-    [SERVICE_CONFIG_TERMTIMEOUT] = { terminate_timeout_millisecs_, BLOBMSG_TYPE_INT32 },
-    [SERVICE_CONFIG_NEW_SESSION] = { new_session_, BLOBMSG_TYPE_BOOL }
-};
-
-static struct blob_attr *
-parse_command(struct blob_attr * const attr)
-{
-    struct blob_attr * command;
-
-    debug("%s\n", __func__);
-
-    if (blobmsg_array_is_type(attr, BLOBMSG_TYPE_STRING))
-    {
-        command = blob_memdup(attr);
-    }
-    else
-    {
-        command = NULL;
-    }
-
-    return command;
-}
-
-static bool
-parse_config(struct service_config * const config, struct blob_attr * const msg)
-{
-    bool success;
-    struct blob_attr * tb[__SERVICE_CONFIG_MAX];
-
-    debug("%s\n", __func__);
-
-    blobmsg_parse(service_config_policy, __SERVICE_CONFIG_MAX, tb,
-                  blobmsg_data(msg), blobmsg_data_len(msg));
-
-    config->command = parse_command(tb[SERVICE_CONFIG_COMMAND]);
-    if (config->command == NULL)
-    {
-        success = false;
-        goto done;
-    }
-
-    /*
-     * The reload command is optional, so check that the user has supplied one
-     * first.
-     */
-    if (tb[SERVICE_CONFIG_RELOAD_COMMAND])
-    {
-        config->reload_command = parse_command(tb[SERVICE_CONFIG_RELOAD_COMMAND]);
-        if (config->reload_command == NULL)
-        {
-            success = false;
-            goto done;
-        }
-    }
-
-    config->terminate_timeout_millisecs =
-        blobmsg_get_u32_or_default(
-            tb[SERVICE_CONFIG_TERMTIMEOUT], default_terminate_timeout_millisecs);
-    config->reload_signal =
-        blobmsg_get_u32_or_default(tb[SERVICE_CONFIG_RELOADSIG], 0);
-    if (tb[SERVICE_CONFIG_PIDFILE])
-    {
-        config->pid_filename =
-            strdup(blobmsg_get_string(tb[SERVICE_CONFIG_PIDFILE]));
-    }
-    config->log_stdout =
-        blobmsg_get_bool_or_default(tb[SERVICE_CONFIG_STDOUT], false);
-    config->log_stderr =
-        blobmsg_get_bool_or_default(tb[SERVICE_CONFIG_STDERR], false);
-    config->create_new_session =
-        blobmsg_get_bool_or_default(tb[SERVICE_CONFIG_NEW_SESSION], false);
-
-    success = true;
-
-done:
-    return success;
 }
 
 enum {
@@ -684,7 +883,8 @@ service_handle_add_request(
 
     service_init(s, ctx);
 
-    if (!parse_config(&s->config, msg))
+    s->config = parse_config(msg);
+    if (s->config == NULL)
     {
         debug("Invalid config for service %s\n", s->name);
         service_free(s);
@@ -734,7 +934,11 @@ handle_request_method(
     }
     else if (strcmp(method, reload_) == 0)
     {
-        success = service_reload(s, msg);
+        success = service_reload(s);
+    }
+    else if (strcmp(method, update_) == 0)
+    {
+        success = service_update(s, msg);
     }
     else
     {
@@ -850,12 +1054,12 @@ done:
 static void
 service_dump(struct service const * const s, struct blob_buf * const b)
 {
-    struct service_config const * const config = &s->config;
+    struct service_config const * const config = s->config;
     void * const cookie = blobmsg_open_table(b, s->name);
 
     /* Dump some state. */
-    blobmsg_add_u8(b, running_, process_is_running(&s->proc));
-    if (process_is_running(&s->proc))
+    blobmsg_add_u8(b, running_, service_is_running(s));
+    if (service_is_running(s))
     {
         blobmsg_add_u32(b, pid_, s->proc.pid);
         blobmsg_add_u32(b, runtime_seconds_, service_runtime_seconds(s));
@@ -954,6 +1158,7 @@ static struct ubus_method main_object_methods[] = {
     UBUS_METHOD(stop_, service_handle_start_stop_restart_request, service_start_stop_restart_policy),
     UBUS_METHOD(reload_, service_handle_start_stop_restart_request, service_start_stop_restart_policy),
     UBUS_METHOD(restart_, service_handle_start_stop_restart_request, service_start_stop_restart_policy),
+    UBUS_METHOD(update_, service_handle_start_stop_restart_request, service_start_stop_restart_policy),
     UBUS_METHOD(signal_, service_handle_signal_request, service_signal_policy),
     UBUS_METHOD(dump_, service_handle_dump_request, service_dump_policy),
 };

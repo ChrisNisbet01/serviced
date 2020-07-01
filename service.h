@@ -35,7 +35,10 @@ struct service {
     struct ustream_fd stdout;
     struct ustream_fd stderr;
 
-    struct service_config config;
+    struct service_config const * config; /* The current config. */
+
+    /* If not NULL this is the config to apply after the service stops. */
+    struct service_config const * next_config;
 };
 
 void
