@@ -13,6 +13,7 @@
 #include <libubox/blobmsg_json.h>
 
 static uint32_t const default_terminate_timeout_millisecs = 100;
+static uint32_t const default_restart_delay_millisecs = 10;
 
 static inline bool
 process_is_running(struct uloop_process const * const process)
@@ -92,6 +93,7 @@ service_free(struct service * const s)
     uloop_process_delete(&s->service_process);
     uloop_process_delete(&s->reload_process);
     uloop_timeout_cancel(&s->timeout);
+    uloop_timeout_cancel(&s->restart_state.delay_timeout);
     config_free(s->config);
     config_free(s->next_config);
 
@@ -285,6 +287,21 @@ done:
     return true;
 }
 
+static void
+restart_state_initialise(struct restart_state_st * const restart)
+{
+    uloop_timeout_cancel(&restart->delay_timeout);
+    restart->crash_count = 0;
+}
+
+static bool
+service_start_fresh(struct service * const s)
+{
+    restart_state_initialise(&s->restart_state);
+
+    return service_start(s);
+}
+
 static bool
 service_stop(struct service * const s)
 {
@@ -320,7 +337,7 @@ service_restart(struct service * const s)
     }
     else
     {
-        service_start(s);
+        service_start_fresh(s);
     }
 
     return true;
@@ -489,7 +506,7 @@ service_reload(struct service * const s)
          * If the caller wants to reload the config, surely he expects it to
          * be running.
          */
-        service_start(s);
+        service_start_fresh(s);
     }
 
     return true;
@@ -565,6 +582,7 @@ enum {
     SERVICE_CONFIG_RELOADSIG,
     SERVICE_CONFIG_TERMTIMEOUT,
     SERVICE_CONFIG_NEW_SESSION,
+    SERVICE_CONFIG_RESTART,
     __SERVICE_CONFIG_MAX,
 };
 
@@ -576,7 +594,8 @@ static const struct blobmsg_policy service_config_policy[__SERVICE_CONFIG_MAX] =
     [SERVICE_CONFIG_PIDFILE] = { pid_file_, BLOBMSG_TYPE_STRING },
     [SERVICE_CONFIG_RELOADSIG] = { reload_signal_, BLOBMSG_TYPE_INT32 },
     [SERVICE_CONFIG_TERMTIMEOUT] = { terminate_timeout_millisecs_, BLOBMSG_TYPE_INT32 },
-    [SERVICE_CONFIG_NEW_SESSION] = { new_session_, BLOBMSG_TYPE_BOOL }
+    [SERVICE_CONFIG_NEW_SESSION] = { new_session_, BLOBMSG_TYPE_BOOL },
+    [SERVICE_CONFIG_RESTART] = { restart_config_, BLOBMSG_TYPE_TABLE }
 };
 
 static struct blob_attr *
@@ -596,6 +615,45 @@ parse_command(struct blob_attr * const attr)
     }
 
     return command;
+}
+
+enum {
+    RESTART_CONFIG_DELAY_MILLISECS,
+    RESTART_CONFIG_CRASH_THRESHOLD_SECS,
+    RESTART_CONFIG_MAX_CRASHES,
+    __RESTART_CONFIG_MAX,
+};
+
+static const struct blobmsg_policy restart_config_policy[__RESTART_CONFIG_MAX] = {
+    [RESTART_CONFIG_DELAY_MILLISECS] = { delay_millisecs_, BLOBMSG_TYPE_INT32 },
+    [RESTART_CONFIG_CRASH_THRESHOLD_SECS] = { crash_threshold_secs_, BLOBMSG_TYPE_INT32 },
+    [RESTART_CONFIG_MAX_CRASHES] = { max_crashes_, BLOBMSG_TYPE_INT32 }
+};
+
+static void
+parse_restart(
+    struct restart_config_st * const restart, struct blob_attr * const restart_attr)
+{
+    if (restart_attr == NULL)
+    {
+        goto done;
+    }
+
+    struct blob_attr * tb[__RESTART_CONFIG_MAX];
+
+    blobmsg_parse(restart_config_policy, __RESTART_CONFIG_MAX, tb,
+                  blobmsg_data(restart_attr), blobmsg_data_len(restart_attr));
+
+    restart->delay_millisecs =
+        blobmsg_get_u32_or_default(
+            tb[RESTART_CONFIG_DELAY_MILLISECS], default_restart_delay_millisecs);
+    restart->crash_threshold_secs =
+        blobmsg_get_u32_or_default(tb[RESTART_CONFIG_CRASH_THRESHOLD_SECS], 0);
+    restart->max_crashes =
+        blobmsg_get_u32_or_default(tb[RESTART_CONFIG_MAX_CRASHES], 0);
+
+done:
+    return;
 }
 
 static struct service_config const *
@@ -654,6 +712,9 @@ parse_config(struct blob_attr * const msg)
         blobmsg_get_bool_or_default(tb[SERVICE_CONFIG_STDERR], false);
     config->create_new_session =
         blobmsg_get_bool_or_default(tb[SERVICE_CONFIG_NEW_SESSION], false);
+
+    parse_restart(&config->restart, tb[SERVICE_CONFIG_RESTART]);
+
 
     success = true;
 
@@ -741,6 +802,54 @@ done:
 }
 
 static void
+service_stopped_unexpectedly(struct service * const s)
+{
+    struct service_config const * const config = s->config;
+    struct restart_config_st const * const restart_config = &config->restart;
+    bool const are_interested_in_crashes = restart_config->crash_threshold_secs > 0;
+
+    if (are_interested_in_crashes)
+    {
+        bool const failed_to_start =
+            s->last_runtime_seconds < restart_config->crash_threshold_secs;
+        struct restart_state_st * const restart_state = &s->restart_state;
+
+        if (failed_to_start)
+        {
+            restart_state->crash_count++;
+            send_service_event(s->ubus, s->name, service_failed_to_start_);
+        }
+        else
+        {
+            restart_state->crash_count = 0;
+        }
+        bool const are_restricting_crashes = restart_config->max_crashes > 0;
+        if (are_restricting_crashes)
+        {
+            bool const too_many_consecutive_crashes =
+                restart_state->crash_count >= restart_config->max_crashes;
+
+            if (!too_many_consecutive_crashes)
+            {
+                /* This will be true even if the service was stopped manually.
+                 * It might be better to have a configuration parameter to
+                 * indicate if the service should restart after it has been
+                 * stopped by way of UBUS request.
+                 */
+                uloop_timeout_set(
+                    &restart_state->delay_timeout, restart_config->delay_millisecs);
+            }
+            else
+            {
+                send_service_event(s->ubus, s->name, service_reached_crash_limit_);
+            }
+        }
+    }
+
+    service_update_config(s);
+}
+
+static void
 service_has_stopped(struct service * const s)
 {
     send_service_event(s->ubus, s->name, service_has_stopped_);
@@ -750,14 +859,15 @@ service_has_stopped(struct service * const s)
         service_delete(s);
         /* s will be invalid at this point if it has been deleted. */
     }
-    else
+    else if (s->restart_after_exit)
     {
         service_update_config(s);
-        if (s->restart_after_exit)
-        {
-            s->restart_after_exit = false;
-            service_start(s);
-        }
+        s->restart_after_exit = false;
+        service_start_fresh(s);
+    }
+    else
+    {
+        service_stopped_unexpectedly(s);
     }
 }
 
@@ -810,6 +920,17 @@ service_timeout(struct uloop_timeout * const t)
     send_signal_to_process(&s->service_process, SIGKILL);
 }
 
+static void
+restart_delay_timeout(struct uloop_timeout * const t)
+{
+    struct service * const s =
+        container_of(t, struct service, restart_state.delay_timeout);
+
+    debug("service %s restart timer lapsed. Restarting service\n", s->name);
+
+    service_start(s);
+}
+
 static uint32_t
 service_runtime_seconds(struct service const * const s)
 {
@@ -851,6 +972,7 @@ service_init(struct service * const s, struct ubus_context * const ubus)
     s->ubus = ubus;
 
     s->timeout.cb = service_timeout;
+    s->restart_state.delay_timeout.cb = restart_delay_timeout;
     s->service_process.cb = service_has_exited;
     s->reload_process.cb = reload_process_has_exited;
     s->last_exit_code = EXIT_SUCCESS;
@@ -931,7 +1053,7 @@ service_handle_add_request(
     if (blobmsg_get_bool_or_default(tb[SERVICE_ADD_AUTO_START], false))
     {
         /* No need to send a separate 'start' message. Start it right now. */
-        service_start(s);
+        service_start_fresh(s);
     }
 
     result = UBUS_STATUS_OK;
@@ -951,7 +1073,7 @@ handle_request_method(
     /* FIXME: Not keen on this long if/else if chain. */
     if (strcmp(method, start_) == 0)
     {
-        success = service_start(s);
+        success = service_start_fresh(s);
     }
     else if (strcmp(method, stop_) == 0)
     {
@@ -1085,12 +1207,27 @@ done:
 }
 
 static void
-service_dump(struct service const * const s, struct blob_buf * const b)
+dump_restart_data(
+    struct service_config const * const config,
+    struct restart_state_st const * const restart_state,
+    struct blob_buf * const b)
+{
+    void * const restart_cookie = blobmsg_open_table(b, restart_config_);
+
+    blobmsg_add_u32(b, delay_millisecs_, config->restart.delay_millisecs);
+    blobmsg_add_u32(b, crash_threshold_secs_, config->restart.crash_threshold_secs);
+    blobmsg_add_u32(b, max_crashes_, config->restart.max_crashes);
+
+    blobmsg_add_u32(b, crash_count_, restart_state->crash_count);
+    blobmsg_add_u8(b, restart_pending_, timer_is_running(&restart_state->delay_timeout));
+    blobmsg_close_table(b, restart_cookie);
+}
+
+static void
+dump_service_data(struct service const * const s, struct blob_buf * const b)
 {
     struct service_config const * const config = s->config;
-    void * const cookie = blobmsg_open_table(b, s->name);
 
-    /* Dump some state. */
     blobmsg_add_u8(b, running_, service_is_running(s));
     if (service_is_running(s))
     {
@@ -1121,7 +1258,15 @@ service_dump(struct service const * const s, struct blob_buf * const b)
     {
         blobmsg_add_string(b, pid_file_, config->pid_filename);
     }
+}
 
+static void
+service_dump(struct service const * const s, struct blob_buf * const b)
+{
+    void * const cookie = blobmsg_open_table(b, s->name);
+
+    dump_service_data(s, b);
+    dump_restart_data(s->config, &s->restart_state, b);
     blobmsg_close_table(b, cookie);
 }
 

@@ -4,16 +4,31 @@
 #include <libubox/avl.h>
 #include <libubox/ustream.h>
 
+struct restart_config_st
+{
+    uint32_t delay_millisecs;
+    uint32_t crash_threshold_secs;
+    uint32_t max_crashes;
+};
+
+struct restart_state_st
+{
+    uint32_t crash_count;
+    struct uloop_timeout delay_timeout;
+};
+
 struct service_config
 {
     struct blob_attr * command; /* The command and args to specify when starting the service. */
     char * pid_filename; /* Write the PID of the service to this file. */
     uint32_t terminate_timeout_millisecs; /* The maximum time to wait for a service to terminate. */
-    bool log_stdout; /* Read stderr rather than direct it to /dev/null. */
+    bool log_stdout; /* Read stdout rather than direct it to /dev/null. */
     bool log_stderr; /* Read stderr rather than direct it to /dev/null. */
     bool create_new_session; /* Make the service a session leader. */
     int reload_signal; /* The signal to use to request a config reload. */
     struct blob_attr * reload_command; /* The command and args to specify when reloading the service. */
+
+    struct restart_config_st restart;
 };
 
 struct service {
@@ -37,6 +52,7 @@ struct service {
     struct ustream_fd stderr;
 
     struct service_config const * config; /* The current config. */
+    struct restart_state_st restart_state;
 
     /* If not NULL this is the config to apply after the service stops. */
     struct service_config const * next_config;

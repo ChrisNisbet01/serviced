@@ -34,3 +34,12 @@ extern char const reload_pid_[];
 extern char const runtime_seconds_[];
 extern char const last_exit_code_[];
 extern char const new_session_[];
+
+extern char const restart_config_[];
+extern char const delay_millisecs_[];
+extern char const crash_threshold_secs_[];
+extern char const max_crashes_[];
+extern char const crash_count_[];
+extern char const service_failed_to_start_[];
+extern char const service_reached_crash_limit_[];
+extern char const restart_pending_[];

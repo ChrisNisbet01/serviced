@@ -35,3 +35,11 @@ char const runtime_seconds_[] = "runtime_seconds";
 char const last_exit_code_[] = "last_exit_code";
 char const new_session_[] = "new_session";
 
+char const restart_config_[] = "restart";
+char const delay_millisecs_[] = "delay_millisecs";
+char const crash_threshold_secs_[] = "crash_threshold_secs";
+char const max_crashes_[] = "max_crashes";
+char const crash_count_[] = "crash_count";
+char const service_failed_to_start_[] = "service_failed_to_start";
+char const service_reached_crash_limit_[] = "service_reached_crash_limit";
+char const restart_pending_[] = "restart_pending";
