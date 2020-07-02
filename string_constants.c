@@ -30,6 +30,7 @@ char const running_[] = "running";
 char const log_stdout_[] = "log_stdout";
 char const log_stderr_[] = "log_stderr";
 char const pid_[] = "pid";
+char const reload_pid_[] = "reload_pid";
 char const runtime_seconds_[] = "runtime_seconds";
 char const last_exit_code_[] = "last_exit_code";
 char const new_session_[] = "new_session";

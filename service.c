@@ -23,7 +23,7 @@ process_is_running(struct uloop_process const * const process)
 static bool
 service_is_running(struct service const * const s)
 {
-    return process_is_running(&s->proc);
+    return process_is_running(&s->service_process);
 }
 
 static inline bool
@@ -89,7 +89,8 @@ service_free(struct service * const s)
 
     services_remove_service(s->ubus, s);
     close_output_streams(s);
-    uloop_process_delete(&s->proc);
+    uloop_process_delete(&s->service_process);
+    uloop_process_delete(&s->reload_process);
     uloop_timeout_cancel(&s->timeout);
     config_free(s->config);
     config_free(s->next_config);
@@ -126,7 +127,7 @@ send_signal_to_process(
 static void
 stop_running_process(struct service * const s)
 {
-    send_signal_to_process(&s->proc, SIGTERM);
+    send_signal_to_process(&s->service_process, SIGTERM);
 
     struct service_config const * const config = s->config;
 
@@ -165,6 +166,21 @@ redirect_file(int const from, int const to, int const o_flag)
 }
 
 static void
+run_command(struct blob_attr * command, int const stdout_fd, int const stderr_fd)
+{
+    /* This is called by the child process. */
+
+    redirect_file(-1, STDIN_FILENO, O_RDONLY);
+    redirect_file(stdout_fd, STDOUT_FILENO, O_WRONLY);
+    redirect_file(stderr_fd, STDERR_FILENO, O_WRONLY);
+
+    char * * const argv = command_array_to_args(command);
+
+    execvp(argv[0], argv);
+    exit(-1);
+}
+
+static void
 service_run(struct service * const s, int const stdout_fd, int const stderr_fd)
 {
     /* This is called by the child process. */
@@ -176,14 +192,7 @@ service_run(struct service * const s, int const stdout_fd, int const stderr_fd)
         setsid();
     }
 
-    redirect_file(-1, STDIN_FILENO, O_RDONLY);
-    redirect_file(stdout_fd, STDOUT_FILENO, O_WRONLY);
-    redirect_file(stderr_fd, STDERR_FILENO, O_WRONLY);
-
-    char * * const argv = command_array_to_args(config->command);
-
-    execvp(argv[0], argv);
-    exit(-1);
+    run_command(config->command, stdout_fd, stderr_fd);
 }
 
 static void
@@ -251,12 +260,12 @@ service_start(struct service * const s)
     /* Parent process. */
     debug("Started service %s, PID %d\n", s->name, (int)pid);
 
-    s->proc.pid = pid;
-    write_pid_file(config->pid_filename, s->proc.pid);
+    s->service_process.pid = pid;
+    write_pid_file(config->pid_filename, s->service_process.pid);
 
     clock_gettime(CLOCK_MONOTONIC, &s->start_timestamp);
 
-    uloop_process_add(&s->proc);
+    uloop_process_add(&s->service_process);
 
     assign_output_stream_to_parent(&s->stdout, stdout_pipe);
     assign_output_stream_to_parent(&s->stderr, stderr_pipe);
@@ -351,7 +360,7 @@ service_send_signal(struct service const * const s, unsigned const sig)
         goto done;
     }
 
-    if (send_signal_to_process(&s->proc, sig) == 0)
+    if (send_signal_to_process(&s->service_process, sig) == 0)
     {
         res = UBUS_STATUS_OK;
         goto done;
@@ -376,6 +385,78 @@ done:
     return res;
 }
 
+static int
+service_exit_code(int const ret)
+{
+    int exit_code;
+
+    if (WIFEXITED(ret))
+    {
+        exit_code = WEXITSTATUS(ret);
+        goto done;
+    }
+
+    if (WIFSIGNALED(ret))
+    {
+        exit_code = WTERMSIG(ret);
+        goto done;
+    }
+
+    if (WIFSTOPPED(ret))
+    {
+        exit_code = WSTOPSIG(ret);
+        goto done;
+    }
+
+    exit_code = EXIT_FAILURE;
+
+done:
+    return exit_code;
+}
+
+static void
+reload_process_has_exited(struct uloop_process * p, int exit_code)
+{
+#if DEBUG != 0
+    struct service * const s =
+        container_of(p, struct service, reload_process);
+
+    debug("Service %s reload process has exited with code: %d\n", s->name, service_exit_code(exit_code));
+#endif
+}
+
+static void
+reload_command_run(struct service * const s)
+{
+    pid_t const pid = fork();
+
+    if (pid < 0)
+    {
+        goto done;
+    }
+
+    if (pid == 0)
+    {
+        struct service_config const * const config = s->config;
+
+        /* Child process. */
+        uloop_done();
+        run_command(config->reload_command, -1, -1);
+        /* Shouldn't get here. */
+        goto done;
+    }
+
+    /* Parent process. */
+    debug("%s: running reload command, PID %d\n", s->name, (int)pid);
+
+    s->reload_process.pid = pid;
+
+    uloop_process_add(&s->reload_process);
+
+done:
+    return;
+}
+
 static bool
 service_reload(struct service * const s)
 {
@@ -389,15 +470,7 @@ service_reload(struct service * const s)
         }
         else if (config->reload_command != NULL)
         {
-            debug("need reload command support\n");
-            /*
-             * Run this command to get the service config reloaded.
-             * An example of the command to run might be something like a
-             * ubus call service reload.
-             */
-            /* Temp debug, just restart the service. */
-            s->restart_after_exit = true;
-            service_stop(s);
+            reload_command_run(s);
         }
         else
         {
@@ -413,7 +486,7 @@ service_reload(struct service * const s)
     {
         /*
          * The service isn't running, so may as well just start it.
-         * If the callers wants to reload the config, surely he expects it to
+         * If the caller wants to reload the config, surely he expects it to
          * be running.
          */
         service_start(s);
@@ -719,19 +792,7 @@ stdout_reader(struct ustream * const s, int const bytes)
         {
             break;
         }
-#if DEBUG
-        time_t t = time(NULL);
-        struct tm tm = *localtime(&t);
-        debug("%d-%02d-%02d %02d:%02d:%02d: ",
-              tm.tm_year + 1900,
-              tm.tm_mon + 1,
-              tm.tm_mday,
-              tm.tm_hour,
-              tm.tm_min,
-              tm.tm_sec);
-
         debug("%s", buf);
-#endif
         /* Log it? */
         ustream_consume(s, len);
     } while (1);
@@ -744,38 +805,9 @@ service_timeout(struct uloop_timeout * const t)
         container_of(t, struct service, timeout);
 
     debug("service %s pid %d didn't stop on SIGTERM, sending SIGKILL.\n",
-          s->name, s->proc.pid);
+          s->name, s->service_process.pid);
 
-    send_signal_to_process(&s->proc, SIGKILL);
-}
-
-static int
-service_exit_code(int const ret)
-{
-    int exit_code;
-
-    if (WIFEXITED(ret))
-    {
-        exit_code = WEXITSTATUS(ret);
-        goto done;
-    }
-
-    if (WIFSIGNALED(ret))
-    {
-        exit_code = WTERMSIG(ret);
-        goto done;
-    }
-
-    if (WIFSTOPPED(ret))
-    {
-        exit_code = WSTOPSIG(ret);
-        goto done;
-    }
-
-    exit_code = EXIT_FAILURE;
-
-done:
-    return exit_code;
+    send_signal_to_process(&s->service_process, SIGKILL);
 }
 
 static uint32_t
@@ -793,7 +825,7 @@ static void
 service_has_exited(struct uloop_process * p, int exit_code)
 {
     struct service * const s =
-        container_of(p, struct service, proc);
+        container_of(p, struct service, service_process);
     struct service_config const * const config = s->config;
     uint32_t const runtime_seconds = service_runtime_seconds(s);
 
@@ -819,7 +851,8 @@ service_init(struct service * const s, struct ubus_context * const ubus)
     s->ubus = ubus;
 
     s->timeout.cb = service_timeout;
-    s->proc.cb = service_has_exited;
+    s->service_process.cb = service_has_exited;
+    s->reload_process.cb = reload_process_has_exited;
     s->last_exit_code = EXIT_SUCCESS;
 
     s->stdout.fd.fd = -1;
@@ -1061,7 +1094,7 @@ service_dump(struct service const * const s, struct blob_buf * const b)
     blobmsg_add_u8(b, running_, service_is_running(s));
     if (service_is_running(s))
     {
-        blobmsg_add_u32(b, pid_, s->proc.pid);
+        blobmsg_add_u32(b, pid_, s->service_process.pid);
         blobmsg_add_u32(b, runtime_seconds_, service_runtime_seconds(s));
     }
     else
@@ -1075,6 +1108,10 @@ service_dump(struct service const * const s, struct blob_buf * const b)
     if (config->reload_command != NULL)
     {
         blobmsg_add_blob(b, config->reload_command);
+        if (process_is_running(&s->reload_process))
+        {
+            blobmsg_add_u32(b, reload_pid_, s->reload_process.pid);
+        }
     }
     blobmsg_add_u32(b, terminate_timeout_millisecs_, config->terminate_timeout_millisecs);
     blobmsg_add_u8(b, log_stdout_, config->log_stdout);

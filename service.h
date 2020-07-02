@@ -30,7 +30,8 @@ struct service {
     int last_exit_code;
     uint32_t last_runtime_seconds;
 
-    struct uloop_process proc;
+    struct uloop_process reload_process;
+    struct uloop_process service_process;
     struct uloop_timeout timeout;
     struct ustream_fd stdout;
     struct ustream_fd stderr;

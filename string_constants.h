@@ -30,6 +30,7 @@ extern char const running_[];
 extern char const log_stdout_[];
 extern char const log_stderr_[];
 extern char const pid_[];
+extern char const reload_pid_[];
 extern char const runtime_seconds_[];
 extern char const last_exit_code_[];
 extern char const new_session_[];
