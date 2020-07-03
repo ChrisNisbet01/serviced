@@ -26,6 +26,12 @@ run(char const * const ubus_path)
 {
     bool success;
 
+    /*
+     * serviced should run in its own session so it's not killed if/when its
+     * parent dies.
+     */
+    //setsid();
+
     ignore_sigpipe();
 
     uloop_init();

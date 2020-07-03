@@ -2,6 +2,8 @@
 
 #if DEBUG
 
+#include <stdio.h>
+
 #define debug(fmt, ...) \
 do { \
 	fprintf(stderr, "%s:%d: ", __FILE__, __LINE__); \

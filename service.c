@@ -67,8 +67,12 @@ config_free(struct service_config const * const config_in)
 
     struct service_config * const config = UNCONST(config_in);
 
-    free(config->pid_filename);
+    free(UNCONST(config->pid_filename));
     config->pid_filename = NULL;
+
+    free(UNCONST(config->config_filename));
+    config->config_filename = NULL;
+
     free(config->command);
     config->command = NULL;
     free(config->reload_command);
@@ -88,7 +92,10 @@ service_free(struct service * const s)
         goto done;
     }
 
+    debug("%s: %s\n", __func__, s->name);
+
     services_remove_service(s->ubus, s);
+    file_monitor_close(&s->config_file_monitor);
     close_output_streams(s);
     uloop_process_delete(&s->service_process);
     uloop_process_delete(&s->reload_process);
@@ -125,9 +132,8 @@ send_signal_to_process(
     return kill(process->pid, sig);
 }
 
-
 static void
-stop_running_process(struct service * const s)
+stop_running_process(struct service * const s, stop_reason_t const stop_reason)
 {
     send_signal_to_process(&s->service_process, SIGTERM);
 
@@ -303,15 +309,17 @@ service_start_fresh(struct service * const s)
 }
 
 static bool
-service_stop(struct service * const s)
+service_stop(struct service * const s, stop_reason_t const stop_reason)
 {
     bool success;
 
     if (service_is_running(s))
     {
+        s->stop_reason = stop_reason;
         if (!service_is_stopping(s))
         {
-            stop_running_process(s);
+            send_service_event(s->ubus, s->name, service_stopping_);
+            stop_running_process(s, stop_reason);
         }
         success = true;
     }
@@ -332,8 +340,7 @@ service_restart(struct service * const s)
 {
     if (service_is_running(s))
     {
-        s->restart_after_exit = true;
-        stop_running_process(s);
+        service_stop(s, stop_reason_restarting);
     }
     else
     {
@@ -353,8 +360,7 @@ service_delete(struct service * const s)
      */
     if (service_is_running(s))
     {
-        s->delete_after_exit = true;
-        service_stop(s);
+        service_stop(s, stop_reason_deleting);
     }
     else
     {
@@ -438,7 +444,9 @@ reload_process_has_exited(struct uloop_process * p, int exit_code)
     struct service * const s =
         container_of(p, struct service, reload_process);
 
-    debug("Service %s reload process has exited with code: %d\n", s->name, service_exit_code(exit_code));
+    debug("Service %s reload process has exited with code: %d\n",
+          s->name,
+          service_exit_code(exit_code));
 #endif
 }
 
@@ -495,8 +503,7 @@ service_reload(struct service * const s)
              * The service doesn't support reload via a signal or command, so
              * it must be restarted instead.
              */
-            s->restart_after_exit = true;
-            service_stop(s);
+            service_stop(s, stop_reason_restarting);
         }
     }
     else
@@ -518,6 +525,22 @@ commands_match(struct blob_attr const * const a, struct blob_attr const * const 
     return blob_attr_equal(a, b);
 }
 
+static bool filenames_match(char const * const a, char const * const b)
+{
+    bool match;
+
+    if (((a == NULL) ^ (b == NULL)) || (a != NULL && strcmp(a, b) != 0))
+    {
+        match = false;
+    }
+    else
+    {
+        match = true;
+    }
+
+    return match;
+}
+
 static bool
 configs_match(
     struct service_config const * const a, struct service_config const * b)
@@ -535,12 +558,18 @@ configs_match(
         goto done;
     }
 
-    if (((a->pid_filename == NULL) ^ (b->pid_filename == NULL))
-        || (a->pid_filename != NULL && strcmp(a->pid_filename, b->pid_filename) != 0))
+    if (!filenames_match(a->pid_filename, b->pid_filename))
     {
         match = false;
         goto done;
     }
+
+    if (!filenames_match(a->config_filename, b->config_filename))
+    {
+        match = false;
+        goto done;
+    }
+
     if (a->terminate_timeout_millisecs != b->terminate_timeout_millisecs)
     {
         match = false;
@@ -579,6 +608,7 @@ enum {
     SERVICE_CONFIG_STDOUT,
     SERVICE_CONFIG_STDERR,
     SERVICE_CONFIG_PIDFILE,
+    SERVICE_CONFIG_CONFIGFILE,
     SERVICE_CONFIG_RELOADSIG,
     SERVICE_CONFIG_TERMTIMEOUT,
     SERVICE_CONFIG_NEW_SESSION,
@@ -592,6 +622,7 @@ static const struct blobmsg_policy service_config_policy[__SERVICE_CONFIG_MAX] =
     [SERVICE_CONFIG_STDOUT] = { stdout_, BLOBMSG_TYPE_BOOL },
     [SERVICE_CONFIG_STDERR] = { stderr_, BLOBMSG_TYPE_BOOL },
     [SERVICE_CONFIG_PIDFILE] = { pid_file_, BLOBMSG_TYPE_STRING },
+    [SERVICE_CONFIG_CONFIGFILE] = { config_file_, BLOBMSG_TYPE_STRING },
     [SERVICE_CONFIG_RELOADSIG] = { reload_signal_, BLOBMSG_TYPE_INT32 },
     [SERVICE_CONFIG_TERMTIMEOUT] = { terminate_timeout_millisecs_, BLOBMSG_TYPE_INT32 },
     [SERVICE_CONFIG_NEW_SESSION] = { new_session_, BLOBMSG_TYPE_BOOL },
@@ -686,7 +717,7 @@ parse_config(struct blob_attr * const msg)
      * The reload command is optional, so check that the user has supplied one
      * first.
      */
-    if (tb[SERVICE_CONFIG_RELOAD_COMMAND])
+    if (tb[SERVICE_CONFIG_RELOAD_COMMAND] != NULL)
     {
         config->reload_command = parse_command(tb[SERVICE_CONFIG_RELOAD_COMMAND]);
         if (config->reload_command == NULL)
@@ -701,10 +732,15 @@ parse_config(struct blob_attr * const msg)
             tb[SERVICE_CONFIG_TERMTIMEOUT], default_terminate_timeout_millisecs);
     config->reload_signal =
         blobmsg_get_u32_or_default(tb[SERVICE_CONFIG_RELOADSIG], 0);
-    if (tb[SERVICE_CONFIG_PIDFILE])
+    if (tb[SERVICE_CONFIG_PIDFILE] != NULL)
     {
         config->pid_filename =
             strdup(blobmsg_get_string(tb[SERVICE_CONFIG_PIDFILE]));
+    }
+    if (tb[SERVICE_CONFIG_CONFIGFILE] != NULL)
+    {
+        config->config_filename =
+            strdup(blobmsg_get_string(tb[SERVICE_CONFIG_CONFIGFILE]));
     }
     config->log_stdout =
         blobmsg_get_bool_or_default(tb[SERVICE_CONFIG_STDOUT], false);
@@ -806,9 +842,9 @@ service_stopped_unexpectedly(struct service * const s)
 {
     struct service_config const * const config = s->config;
     struct restart_config_st const * const restart_config = &config->restart;
-    bool const are_interested_in_crashes = restart_config->crash_threshold_secs > 0;
+    bool const interested_in_crashes = restart_config->crash_threshold_secs > 0;
 
-    if (are_interested_in_crashes)
+    if (interested_in_crashes)
     {
         bool const failed_to_start =
             s->last_runtime_seconds < restart_config->crash_threshold_secs;
@@ -823,13 +859,19 @@ service_stopped_unexpectedly(struct service * const s)
         {
             restart_state->crash_count = 0;
         }
-        bool const are_restricting_crashes = restart_config->max_crashes > 0;
-        if (are_restricting_crashes)
+
+        bool const restricting_crashes = restart_config->max_crashes > 0;
+
+        if (restricting_crashes)
         {
             bool const too_many_consecutive_crashes =
                 restart_state->crash_count >= restart_config->max_crashes;
 
-            if (!too_many_consecutive_crashes)
+            if (too_many_consecutive_crashes)
+            {
+                send_service_event(s->ubus, s->name, service_reached_crash_limit_);
+            }
+            else
             {
                 /* This will be true even if the service was stopped manually.
                  * It might be better to have a configuration parameter to
@@ -838,10 +880,6 @@ service_stopped_unexpectedly(struct service * const s)
                  */
                 uloop_timeout_set(
                     &restart_state->delay_timeout, restart_config->delay_millisecs);
-            }
-            else
-            {
-                send_service_event(s->ubus, s->name, service_reached_crash_limit_);
             }
         }
     }
@@ -853,17 +891,22 @@ static void
 service_has_stopped(struct service * const s)
 {
     send_service_event(s->ubus, s->name, service_has_stopped_);
-    if (s->delete_after_exit)
+    stop_reason_t const stop_reason = s->stop_reason;
+
+    s->stop_reason = stop_reason_none;
+    if (stop_reason == stop_reason_deleting)
     {
-        s->delete_after_exit = false;
         service_delete(s);
         /* s will be invalid at this point if it has been deleted. */
     }
-    else if (s->restart_after_exit)
+    else if (stop_reason == stop_reason_restarting)
     {
         service_update_config(s);
-        s->restart_after_exit = false;
         service_start_fresh(s);
+    }
+    else if (stop_reason == stop_reason_request)
+    {
+        service_update_config(s);
     }
     else
     {
@@ -966,6 +1009,17 @@ service_has_exited(struct uloop_process * p, int exit_code)
 }
 
 static void
+config_file_changed_cb(struct file_monitor_st * const monitor)
+{
+#if DEBUG == 1
+    struct service * const s =
+        container_of(monitor, struct service, config_file_monitor);
+
+    debug("service %s config file (%s) changed\n", s->name, s->config->config_filename);
+#endif
+}
+
+static void
 service_init(struct service * const s, struct ubus_context * const ubus)
 {
     debug("%s\n", __func__);
@@ -984,6 +1038,8 @@ service_init(struct service * const s, struct ubus_context * const ubus)
     s->stderr.fd.fd = -1;
     s->stderr.stream.string_data = true;
     s->stderr.stream.notify_read = stderr_reader;
+
+    file_monitor_init(&s->config_file_monitor);
 }
 
 enum {
@@ -1050,6 +1106,12 @@ service_handle_add_request(
     services_insert_service(ctx, s);
     send_service_event(s->ubus, s->name, service_added_);
 
+    if (s->config->config_filename != NULL)
+    {
+        file_monitor_open(
+            &s->config_file_monitor, s->config->config_filename, config_file_changed_cb);
+    }
+
     if (blobmsg_get_bool_or_default(tb[SERVICE_ADD_AUTO_START], false))
     {
         /* No need to send a separate 'start' message. Start it right now. */
@@ -1077,7 +1139,7 @@ handle_request_method(
     }
     else if (strcmp(method, stop_) == 0)
     {
-        success = service_stop(s);
+        success = service_stop(s, stop_reason_request);
     }
     else if (strcmp(method, restart_) == 0)
     {
@@ -1242,6 +1304,10 @@ dump_service_data(struct service const * const s, struct blob_buf * const b)
 
     /* Dump some of the configuration so it's possible to check it. */
     blobmsg_add_blob(b, config->command);
+    if (config->reload_signal != 0)
+    {
+        blobmsg_add_u32(b, reload_signal_, config->reload_signal);
+    }
     if (config->reload_command != NULL)
     {
         blobmsg_add_blob(b, config->reload_command);
@@ -1257,6 +1323,10 @@ dump_service_data(struct service const * const s, struct blob_buf * const b)
     if (config->pid_filename != NULL)
     {
         blobmsg_add_string(b, pid_file_, config->pid_filename);
+    }
+    if (config->config_filename != NULL)
+    {
+        blobmsg_add_string(b, config_file_, config->config_filename);
     }
 }
 

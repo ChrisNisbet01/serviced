@@ -1,4 +1,7 @@
 #pragma once
+
+#include "file_monitor.h"
+
 #include <libubus.h>
 
 #include <libubox/avl.h>
@@ -20,7 +23,8 @@ struct restart_state_st
 struct service_config
 {
     struct blob_attr * command; /* The command and args to specify when starting the service. */
-    char * pid_filename; /* Write the PID of the service to this file. */
+    char const * pid_filename; /* Write the PID of the service to this file. */
+    char const * config_filename; /* The service will reload if this file changes. */
     uint32_t terminate_timeout_millisecs; /* The maximum time to wait for a service to terminate. */
     bool log_stdout; /* Read stdout rather than direct it to /dev/null. */
     bool log_stderr; /* Read stderr rather than direct it to /dev/null. */
@@ -31,6 +35,14 @@ struct service_config
     struct restart_config_st restart;
 };
 
+typedef enum
+{
+    stop_reason_none,
+    stop_reason_deleting,
+    stop_reason_restarting,
+    stop_reason_request
+} stop_reason_t;
+
 struct service {
 	struct avl_node avl;
     bool in_avl;
@@ -38,8 +50,7 @@ struct service {
 
     struct ubus_context * ubus;
 
-    bool delete_after_exit;
-    bool restart_after_exit;
+    stop_reason_t stop_reason;
 
     struct timespec start_timestamp;
     int last_exit_code;
@@ -50,6 +61,8 @@ struct service {
     struct uloop_timeout timeout;
     struct ustream_fd stdout;
     struct ustream_fd stderr;
+
+    struct file_monitor_st config_file_monitor;
 
     struct service_config const * config; /* The current config. */
     struct restart_state_st restart_state;
