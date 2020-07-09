@@ -7,21 +7,18 @@
 #include <libubox/avl.h>
 #include <libubox/ustream.h>
 
-struct restart_config_st
-{
+struct restart_config_st {
     uint32_t delay_millisecs;
     uint32_t crash_threshold_secs;
     uint32_t max_crashes;
 };
 
-struct restart_state_st
-{
+struct restart_state_st {
     uint32_t crash_count;
     struct uloop_timeout delay_timeout;
 };
 
-struct service_config
-{
+struct service_config {
     struct blob_attr * command; /* The command and args to specify when starting the service. */
     char const * pid_filename; /* Write the PID of the service to this file. */
     char const * config_filename; /* The service will reload if this file changes. */
@@ -35,8 +32,7 @@ struct service_config
     struct restart_config_st restart;
 };
 
-typedef enum
-{
+typedef enum {
     stop_reason_none,
     stop_reason_deleting,
     stop_reason_restarting,
@@ -61,8 +57,10 @@ struct service {
     struct uloop_timeout timeout;
     struct ustream_fd stdout;
     struct ustream_fd stderr;
-
-    struct file_monitor_st config_file_monitor;
+    struct {
+        struct file_monitor_st monitor;
+        struct uloop_timeout change_timeout;
+    } config_file;
 
     struct service_config const * config; /* The current config. */
     struct restart_state_st restart_state;

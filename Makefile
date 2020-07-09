@@ -5,8 +5,8 @@ INSTALL_BIN?= install -m 755
 INSTALL_DATA?= install -m 666
 DEBUG?=0
 
-CFLAGS +=-s -Wall -Werror -Wmissing-prototypes -std=gnu11 -fPIC
-CFLAGS +=-D_GNU_SOURCE -DDEBUG=$(DEBUG)
+CFLAGS += -Wall -Werror -Wmissing-prototypes -std=gnu11
+CFLAGS += -D_GNU_SOURCE -DDEBUG=$(DEBUG)
 CFLAGS += -I$(CURDIR)
 
 LIBS=-lubus -lubox

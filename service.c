@@ -14,6 +14,7 @@
 
 static uint32_t const default_terminate_timeout_millisecs = 100;
 static uint32_t const default_restart_delay_millisecs = 10;
+static int const config_file_quiet_time_millisecs = 1000;
 
 static inline bool
 process_is_running(struct uloop_process const * const process)
@@ -95,7 +96,10 @@ service_free(struct service * const s)
     debug("%s: %s\n", __func__, s->name);
 
     services_remove_service(s->ubus, s);
-    file_monitor_close(&s->config_file_monitor);
+
+    file_monitor_close(&s->config_file.monitor);
+    uloop_timeout_cancel(&s->config_file.change_timeout);
+
     close_output_streams(s);
     uloop_process_delete(&s->service_process);
     uloop_process_delete(&s->reload_process);
@@ -1009,14 +1013,25 @@ service_has_exited(struct uloop_process * p, int exit_code)
 }
 
 static void
+config_file_timeout(struct uloop_timeout * const t)
+{
+    struct service * const s =
+        container_of(t, struct service, config_file.change_timeout);
+
+    debug("%s: service %s pid %d\n", __func__, s->name, s->service_process.pid);
+
+    service_reload(s);
+}
+
+static void
 config_file_changed_cb(struct file_monitor_st * const monitor)
 {
-#if DEBUG == 1
     struct service * const s =
-        container_of(monitor, struct service, config_file_monitor);
+        container_of(monitor, struct service, config_file.monitor);
 
     debug("service %s config file (%s) changed\n", s->name, s->config->config_filename);
-#endif
+
+    uloop_timeout_set(&s->config_file.change_timeout, config_file_quiet_time_millisecs);
 }
 
 static void
@@ -1039,7 +1054,8 @@ service_init(struct service * const s, struct ubus_context * const ubus)
     s->stderr.stream.string_data = true;
     s->stderr.stream.notify_read = stderr_reader;
 
-    file_monitor_init(&s->config_file_monitor);
+    file_monitor_init(&s->config_file.monitor);
+    s->config_file.change_timeout.cb = config_file_timeout;
 }
 
 enum {
@@ -1109,7 +1125,7 @@ service_handle_add_request(
     if (s->config->config_filename != NULL)
     {
         file_monitor_open(
-            &s->config_file_monitor, s->config->config_filename, config_file_changed_cb);
+            &s->config_file.monitor, s->config->config_filename, config_file_changed_cb);
     }
 
     if (blobmsg_get_bool_or_default(tb[SERVICE_ADD_AUTO_START], false))
