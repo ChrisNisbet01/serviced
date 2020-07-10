@@ -1,6 +1,7 @@
 #pragma once
 
 extern char const service_has_started_[];
+extern char const service_config_file_has_changed_[];
 extern char const service_has_stopped_[];
 extern char const service_deleted_[];
 extern char const service_added_[];

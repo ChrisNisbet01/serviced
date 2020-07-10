@@ -1,6 +1,7 @@
 #include "string_constants.h"
 
 char const service_has_started_[] = "service.has_started";
+char const service_config_file_has_changed_[] = "service_config_file_has_changed";
 char const service_has_stopped_[] = "service.has_stopped";
 char const service_deleted_[] = "service.deleted";
 char const service_added_[] = "service.added";

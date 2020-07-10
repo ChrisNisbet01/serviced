@@ -14,7 +14,6 @@
 
 static uint32_t const default_terminate_timeout_millisecs = 100;
 static uint32_t const default_restart_delay_millisecs = 10;
-static int const config_file_quiet_time_millisecs = 1000;
 
 static inline bool
 process_is_running(struct uloop_process const * const process)
@@ -97,8 +96,7 @@ service_free(struct service * const s)
 
     services_remove_service(s->ubus, s);
 
-    file_monitor_close(&s->config_file.monitor);
-    uloop_timeout_cancel(&s->config_file.change_timeout);
+    file_monitor_close(s->config_file_monitor);
 
     close_output_streams(s);
     uloop_process_delete(&s->service_process);
@@ -166,13 +164,13 @@ command_array_to_args(struct blob_attr * const command)
 }
 
 static void
-redirect_file(int const from, int const to, int const o_flag)
+redirect_fd(int const from, int const to, int const o_flag)
 {
     int const fd = (from != -1) ? from : open("/dev/null", o_flag);
 
     if (fd > -1)
     {
-        dup2(fd, to);
+        TEMP_FAILURE_RETRY(dup2(fd, to));
         close(fd);
     }
 }
@@ -182,9 +180,9 @@ run_command(struct blob_attr * command, int const stdout_fd, int const stderr_fd
 {
     /* This is called by the child process. */
 
-    redirect_file(-1, STDIN_FILENO, O_RDONLY);
-    redirect_file(stdout_fd, STDOUT_FILENO, O_WRONLY);
-    redirect_file(stderr_fd, STDERR_FILENO, O_WRONLY);
+    redirect_fd(-1, STDIN_FILENO, O_RDONLY);
+    redirect_fd(stdout_fd, STDOUT_FILENO, O_WRONLY);
+    redirect_fd(stderr_fd, STDERR_FILENO, O_WRONLY);
 
     char * * const argv = command_array_to_args(command);
 
@@ -1013,25 +1011,15 @@ service_has_exited(struct uloop_process * p, int exit_code)
 }
 
 static void
-config_file_timeout(struct uloop_timeout * const t)
+config_file_timeout(void * const user_ctx)
 {
-    struct service * const s =
-        container_of(t, struct service, config_file.change_timeout);
+    struct service * const s = user_ctx;
 
     debug("%s: service %s pid %d\n", __func__, s->name, s->service_process.pid);
 
+    send_service_event(s->ubus, s->name, service_config_file_has_changed_);
+
     service_reload(s);
-}
-
-static void
-config_file_changed_cb(struct file_monitor_st * const monitor)
-{
-    struct service * const s =
-        container_of(monitor, struct service, config_file.monitor);
-
-    debug("service %s config file (%s) changed\n", s->name, s->config->config_filename);
-
-    uloop_timeout_set(&s->config_file.change_timeout, config_file_quiet_time_millisecs);
 }
 
 static void
@@ -1054,8 +1042,7 @@ service_init(struct service * const s, struct ubus_context * const ubus)
     s->stderr.stream.string_data = true;
     s->stderr.stream.notify_read = stderr_reader;
 
-    file_monitor_init(&s->config_file.monitor);
-    s->config_file.change_timeout.cb = config_file_timeout;
+    s->config_file_monitor = NULL;
 }
 
 enum {
@@ -1124,8 +1111,9 @@ service_handle_add_request(
 
     if (s->config->config_filename != NULL)
     {
-        file_monitor_open(
-            &s->config_file.monitor, s->config->config_filename, config_file_changed_cb);
+        s->config_file_monitor =
+            file_monitor_open(
+                s->config->config_filename, config_file_timeout, s);
     }
 
     if (blobmsg_get_bool_or_default(tb[SERVICE_ADD_AUTO_START], false))

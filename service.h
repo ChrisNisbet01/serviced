@@ -57,10 +57,7 @@ struct service {
     struct uloop_timeout timeout;
     struct ustream_fd stdout;
     struct ustream_fd stderr;
-    struct {
-        struct file_monitor_st monitor;
-        struct uloop_timeout change_timeout;
-    } config_file;
+    struct file_monitor_st * config_file_monitor;
 
     struct service_config const * config; /* The current config. */
     struct restart_state_st restart_state;
