@@ -4,6 +4,7 @@
 #include "utils.h"
 
 #include <libubox/avl-cmp.h>
+#include <libubox/ulog.h>
 
 #include <stddef.h>
 #include <unistd.h>
@@ -69,6 +70,8 @@ send_service_event(
     char const * const event)
 {
     struct blob_buf b;
+
+    ULOG_INFO("service: %s event: %s\n", service_name, event);
 
     blob_buf_full_init(&b, 0);
     blobmsg_add_string(&b, service_, service_name);

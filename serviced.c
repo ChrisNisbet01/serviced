@@ -1,6 +1,8 @@
+#include "log.h"
 #include "serviced_ubus.h"
 
 #include <libubox/uloop.h>
+#include <libubox/ulog.h>
 
 #include <stdio.h>
 #include <stddef.h>
@@ -61,7 +63,12 @@ usage(FILE * const fp, char const * const program_name)
             "usage: %s [-u ubus_path]\n"
             "serviced\n\n"
             "\t-h\thelp      - this help\n"
-            "\t-u\tubus path - UBUS socket path\n",
+            "\t-u\tubus path - UBUS socket path\n"
+            "\t-s\t          - log to syslog\n"
+            "\t-e\t          - log to stderr\n"
+            "\t-k\t          - log to kmsg\n"
+            "\t-f\t          - log facility\n"
+            "\t-t\t          - log threshold\n",
             program_name);
 }
 
@@ -71,11 +78,29 @@ main(int argc, char ** argv)
     int exit_code;
     char const * ubus_path = NULL;
     int opt;
+    unsigned log_channels = 0;
+    unsigned int log_facility = LOG_DAEMON;
+    int log_threshold = -1;
 
-    while ((opt = getopt(argc, argv, "hu:")) != -1)
+    while ((opt = getopt(argc, argv, "sekhu:f:t:")) != -1)
     {
         switch (opt)
         {
+            case 's':
+                log_channels |= ULOG_SYSLOG;
+                break;
+            case 'e':
+                log_channels |= ULOG_STDIO;
+                break;
+            case 'k':
+                log_channels |= ULOG_KMSG;
+                break;
+            case 'f':
+                log_facility = atoi(optarg);
+                break;
+            case 't':
+                log_threshold = atoi(optarg);
+                break;
             case 'u':
                 ubus_path = optarg;
                 break;
@@ -90,8 +115,23 @@ main(int argc, char ** argv)
         }
     }
 
+    log_open(log_threshold, log_channels, log_facility, "serviced");
+
+    ULOG_NOTE("serviced started\n");
+
     exit_code = run(ubus_path) ? EXIT_SUCCESS : EXIT_FAILURE;
 
 done:
+    if (exit_code == EXIT_SUCCESS)
+    {
+        ULOG_NOTE("serviced exiting\n");
+    }
+    else
+    {
+        ULOG_ERR("serviced exiting\n");
+    }
+
+    log_close();
+
     return exit_code;
 }
