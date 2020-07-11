@@ -67,7 +67,6 @@ usage(FILE * const fp, char const * const program_name)
             "\t-s\t          - log to syslog\n"
             "\t-e\t          - log to stderr\n"
             "\t-k\t          - log to kmsg\n"
-            "\t-f\t          - log facility\n"
             "\t-t\t          - log threshold\n",
             program_name);
 }
@@ -79,7 +78,6 @@ main(int argc, char ** argv)
     char const * ubus_path = NULL;
     int opt;
     unsigned log_channels = 0;
-    unsigned int log_facility = LOG_DAEMON;
     int log_threshold = -1;
 
     while ((opt = getopt(argc, argv, "sekhu:f:t:")) != -1)
@@ -94,9 +92,6 @@ main(int argc, char ** argv)
                 break;
             case 'k':
                 log_channels |= ULOG_KMSG;
-                break;
-            case 'f':
-                log_facility = atoi(optarg);
                 break;
             case 't':
                 log_threshold = atoi(optarg);
@@ -115,7 +110,7 @@ main(int argc, char ** argv)
         }
     }
 
-    log_open(log_threshold, log_channels, log_facility, "serviced");
+    log_open(log_threshold, log_channels);
 
     ULOG_NOTE("serviced started\n");
 

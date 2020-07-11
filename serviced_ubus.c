@@ -1,6 +1,7 @@
 #include "serviced_ubus.h"
 #include "debug.h"
 #include "string_constants.h"
+#include "log_ubus.h"
 #include "utils.h"
 
 #include <libubox/avl-cmp.h>
@@ -25,6 +26,7 @@ ubus_connected(struct ubus_connection_ctx_st * const connection_context)
 
     debug("connected\n");
 	ubus_init_service(ubus_ctx);
+    ubus_init_log(ubus_ctx);
 	ubus_add_uloop(ubus_ctx);
 }
 

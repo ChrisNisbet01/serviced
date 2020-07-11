@@ -1404,7 +1404,7 @@ service_handle_dump_request(
     ubus_send_reply(ctx, req, b.head);
     blob_buf_free(&b);
 
-    return 0;
+    return UBUS_STATUS_OK;
 }
 
 static struct ubus_method main_object_methods[] = {
