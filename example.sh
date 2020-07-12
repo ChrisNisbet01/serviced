@@ -2,7 +2,6 @@
 
 i=0
 while [ $i -lt $1 ]; do
-    echo "$(date)" >> /tmp/out.txt
     echo "to stdout and count is $i args $@"
     echo "to stderr and count is $i" >&2
     sleep 1

@@ -14,7 +14,6 @@ LIBS=-lubus -lubox
 OBJS = \
 	file_monitor.o\
 	log.o\
-	log_ubus.o\
 	serviced.o\
 	serviced_ubus.o\
 	service.o\

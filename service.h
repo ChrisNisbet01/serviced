@@ -3,22 +3,24 @@
 #include "file_monitor.h"
 
 #include <libubus.h>
-
 #include <libubox/avl.h>
 #include <libubox/ustream.h>
 
-struct restart_config_st {
+struct restart_config_st
+{
     uint32_t delay_millisecs;
     uint32_t crash_threshold_secs;
     uint32_t max_crashes;
 };
 
-struct restart_state_st {
+struct restart_state_st
+{
     uint32_t crash_count;
     struct uloop_timeout delay_timeout;
 };
 
-struct service_config {
+struct service_config
+{
     struct blob_attr * command; /* The command and args to specify when starting the service. */
     char const * pid_filename; /* Write the PID of the service to this file. */
     char const * config_filename; /* The service will reload if this file changes. */
@@ -39,12 +41,15 @@ typedef enum {
     stop_reason_request
 } stop_reason_t;
 
-struct service {
-	struct avl_node avl;
-    bool in_avl;
-    const char *name;
+typedef struct serviced_context_st serviced_context_st;
 
-    struct ubus_context * ubus;
+struct service
+{
+    struct avl_node avl;
+    bool in_avl;
+    const char * name;
+
+    serviced_context_st * context;
 
     stop_reason_t stop_reason;
 
@@ -67,8 +72,8 @@ struct service {
 };
 
 void
-service_stopped(struct service *s);
+service_stopped(struct service * s);
 
 void
-ubus_init_service(struct ubus_context *ubus);
+ubus_init_service(struct ubus_context * ubus);
 
