@@ -1,9 +1,11 @@
 #include "serviced_ubus.h"
 #include "debug.h"
-#include "string_constants.h"
+#include "iterate_files.h"
 #include "log.h"
+#include "string_constants.h"
 #include "utils.h"
 
+#include <json-c/json.h>
 #include <libubox/avl-cmp.h>
 #include <libubox/blobmsg_json.h>
 #include <libubox/ulog.h>
@@ -15,11 +17,6 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
-
-struct serviced_context_st {
-    struct ubus_connection_ctx_st ubus_connection;
-    struct avl_tree services;
-};
 
 static void
 ubus_reconnected(struct ubus_connection_ctx_st * const connection_context)
@@ -102,11 +99,80 @@ serviced_deinit(serviced_context_st * const context)
         services_remove_service(s);
     }
 
+    free(context);
+
 done:
     return;
 }
 
-serviced_context_st * serviced_init(char const * const ubus_path)
+static bool
+parse_early_start_json(
+    json_object * const json_obj, struct serviced_context_st * const context)
+{
+    bool success;
+    struct blob_buf blob;
+
+    blob_buf_full_init(&blob, 0);
+
+    if (!blobmsg_add_json_element(&blob, "", json_obj))
+    {
+        success = false;
+        goto done;
+    }
+
+    success = service_add(context, blob_data(blob.head)) == service_add_success;
+
+done:
+    blob_buf_free(&blob);
+
+    return success;
+}
+
+static bool
+load_early_start_from_json_file(
+    char const * const filename, struct serviced_context_st * const context)
+{
+    bool success;
+    json_object * const json_obj = json_object_from_file(filename);
+
+    if (json_obj == NULL)
+    {
+        success = false;
+        goto done;
+    }
+
+    success = parse_early_start_json(json_obj, context);
+
+done:
+    json_object_put(json_obj);
+
+    if (!success)
+    {
+        debug("failed to load %s\n", filename);
+    }
+
+    return success;
+}
+
+static void
+early_start_callback(char const * const filename, void * const ctx)
+{
+    struct serviced_context_st * const context = ctx;
+
+    debug("loading service from %s\n", filename);
+    load_early_start_from_json_file(filename, context);
+}
+
+static void
+start_early_services(
+    struct serviced_context_st * const context, char const * const early_start_dir)
+{
+    debug("%s pattern %s\n", __func__, early_start_dir);
+    iterate_files_in_directory(early_start_dir, early_start_callback, context);
+}
+
+serviced_context_st *
+serviced_init(char const * const early_start_dir, char const * const ubus_path)
 {
     struct serviced_context_st * const context = calloc(1, sizeof *context);
 
@@ -116,6 +182,8 @@ serviced_context_st * serviced_init(char const * const ubus_path)
     }
 
     avl_init(&context->services, avl_strcmp, false, NULL);
+
+    start_early_services(context, early_start_dir);
 
     ubus_connection_init(
         &context->ubus_connection,
@@ -132,11 +200,8 @@ typedef void (*services_iterate_cb)(struct service * s, void * user_ctx);
 
 void
 services_insert_service(
-    struct ubus_context * const ubus, struct service * const s)
+    struct serviced_context_st * const context, struct service * const s)
 {
-    struct serviced_context_st * const context =
-        container_of(ubus, struct serviced_context_st, ubus_connection.context);
-
     avl_insert(&context->services, &s->avl);
     s->in_avl = true;
 }
@@ -925,7 +990,8 @@ service_alloc(char const * const service_name)
 }
 
 struct service *
-service_new(char const * const service_name, struct ubus_context * const ubus_ctx)
+service_new(
+    struct serviced_context_st * const context, char const * const service_name)
 {
     struct service * const s = service_alloc(service_name);
 
@@ -934,8 +1000,6 @@ service_new(char const * const service_name, struct ubus_context * const ubus_ct
         goto done;
     }
 
-    struct serviced_context_st * const context =
-        container_of(ubus_ctx, struct serviced_context_st, ubus_connection.context);
 
     service_init(s, context);
 
@@ -945,10 +1009,8 @@ done:
 
 struct service *
 services_lookup_service(
-    struct ubus_context * const ubus, char const * const service_name)
+    struct serviced_context_st * const context, char const * const service_name)
 {
-    struct serviced_context_st * const context =
-        container_of(ubus, struct serviced_context_st, ubus_connection.context);
     struct service * s; /* Required by avl_find_element. */
 
     return avl_find_element(&context->services, service_name, s, avl);

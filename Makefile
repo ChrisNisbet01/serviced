@@ -9,10 +9,11 @@ CFLAGS += -Wall -Werror -Wmissing-prototypes -std=gnu11
 CFLAGS += -D_GNU_SOURCE -DDEBUG=$(DEBUG)
 CFLAGS += -I$(CURDIR)
 
-LIBS=-lubus -lubox
+LIBS=-lubus -lubox -ljson-c -lblobmsg_json
 
 OBJS = \
 	file_monitor.o\
+	iterate_files.o\
 	log.o\
 	serviced.o\
 	serviced_ubus.o\

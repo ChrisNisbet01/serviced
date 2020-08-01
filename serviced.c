@@ -24,7 +24,7 @@ ignore_sigpipe(void)
 }
 
 static bool
-run(char const * const ubus_path)
+run(char const * const early_start_dir, char const * const ubus_path)
 {
     bool success;
 
@@ -38,7 +38,8 @@ run(char const * const ubus_path)
 
     uloop_init();
 
-    serviced_context_st * const context = serviced_init(ubus_path);
+    serviced_context_st * const context =
+        serviced_init(early_start_dir, ubus_path);
 
     if (context != NULL)
     {
@@ -64,6 +65,7 @@ usage(FILE * const fp, char const * const program_name)
             "serviced\n\n"
             "\t-h\thelp      - this help\n"
             "\t-u\tubus path - UBUS socket path\n"
+            "\t-d\tearly start early start path\n"
             "\t-s\t          - log to syslog\n"
             "\t-e\t          - log to stderr\n"
             "\t-k\t          - log to kmsg\n"
@@ -79,8 +81,9 @@ main(int argc, char ** argv)
     int opt;
     unsigned log_channels = 0;
     int log_threshold = -1;
+    char const * early_start_dir = NULL;
 
-    while ((opt = getopt(argc, argv, "sekhu:f:t:")) != -1)
+    while ((opt = getopt(argc, argv, "sekhu:f:t:d:")) != -1)
     {
         switch (opt)
         {
@@ -99,6 +102,9 @@ main(int argc, char ** argv)
             case 'u':
                 ubus_path = optarg;
                 break;
+            case 'd':
+                early_start_dir = optarg;
+                break;
             case 'h':
                 usage(stdout, argv[0]);
                 exit_code = EXIT_SUCCESS;
@@ -114,7 +120,7 @@ main(int argc, char ** argv)
 
     ULOG_NOTE("serviced started\n");
 
-    exit_code = run(ubus_path) ? EXIT_SUCCESS : EXIT_FAILURE;
+    exit_code = run(early_start_dir, ubus_path) ? EXIT_SUCCESS : EXIT_FAILURE;
 
 done:
     if (exit_code == EXIT_SUCCESS)

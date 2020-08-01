@@ -77,3 +77,12 @@ service_stopped(struct service * s);
 void
 ubus_init_service(struct ubus_context * ubus);
 
+typedef enum service_add_error_t {
+    service_add_success,
+    service_add_invalid_argument,
+    service_add_unknown_error
+} service_add_error_t;
+
+service_add_error_t
+service_add(serviced_context_st * context, struct blob_attr * msg);
+

@@ -264,16 +264,11 @@ static const struct blobmsg_policy service_add_policy[__SERVICE_ADD_MAX] = {
     [SERVICE_ADD_AUTO_START] = { auto_start_, BLOBMSG_TYPE_BOOL },
 };
 
-static int
-service_handle_add_request(
-    struct ubus_context * const ctx,
-    struct ubus_object * const obj,
-    struct ubus_request_data * const req,
-    char const * const method,
-    struct blob_attr * const msg)
+service_add_error_t
+service_add(struct serviced_context_st * const context, struct blob_attr * const msg)
 {
     struct blob_attr * tb[__SERVICE_ADD_MAX];
-    int result;
+    service_add_error_t result;
 
     blobmsg_parse(service_add_policy, __SERVICE_ADD_MAX, tb,
                   blobmsg_data(msg), blobmsg_data_len(msg));
@@ -282,24 +277,24 @@ service_handle_add_request(
 
     if (service_name == NULL)
     {
-        result = UBUS_STATUS_INVALID_ARGUMENT;
+        result = service_add_invalid_argument;
         goto done;
     }
 
-    if (services_lookup_service(ctx, service_name) != NULL)
+    if (services_lookup_service(context, service_name) != NULL)
     {
         debug("Service %s already exists\n", service_name);
-        result = UBUS_STATUS_INVALID_ARGUMENT;
+        result = service_add_invalid_argument;
         goto done;
     }
 
     debug("Create new service %s\n", service_name);
 
-    struct service * const s = service_new(service_name, ctx);
+    struct service * const s = service_new(context, service_name);
 
     if (s == NULL)
     {
-        result = UBUS_STATUS_UNKNOWN_ERROR;
+        result = service_add_unknown_error;
         goto done;
     }
 
@@ -308,11 +303,11 @@ service_handle_add_request(
     {
         debug("Invalid config for service %s\n", s->name);
         service_free(s);
-        result = UBUS_STATUS_INVALID_ARGUMENT;
+        result = service_add_invalid_argument;
         goto done;
     }
 
-    services_insert_service(ctx, s);
+    services_insert_service(context, s);
     send_service_event(s, service_added_);
 
     if (s->config->config_filename != NULL)
@@ -328,10 +323,42 @@ service_handle_add_request(
         service_start_fresh(s);
     }
 
-    result = UBUS_STATUS_OK;
+    result = service_add_success;
 
 done:
     return result;
+}
+
+static int
+service_handle_add_request(
+    struct ubus_context * const ctx,
+    struct ubus_object * const obj,
+    struct ubus_request_data * const req,
+    char const * const method,
+    struct blob_attr * const msg)
+{
+    struct serviced_context_st * const context =
+        container_of(ctx, struct serviced_context_st, ubus_connection.context);
+    service_add_error_t const add_result = service_add(context, msg);
+
+    int res;
+    switch (add_result)
+    {
+        case service_add_success:
+            res = UBUS_STATUS_OK;
+            break;
+        case service_add_invalid_argument:
+            res = UBUS_STATUS_INVALID_ARGUMENT;
+            break;
+        case service_add_unknown_error:
+            res = UBUS_STATUS_UNKNOWN_ERROR;
+            break;
+        default:
+            res = UBUS_STATUS_OK;
+            break;
+    }
+
+    return res;
 }
 
 static bool
@@ -394,6 +421,8 @@ service_handle_start_stop_restart_request(
 {
     struct blob_attr * tb[__SERVICE_START_STOP_MAX];
     int result;
+    struct serviced_context_st * const context =
+        container_of(ctx, struct serviced_context_st, ubus_connection.context);
 
     blobmsg_parse(service_start_stop_restart_policy, __SERVICE_START_STOP_MAX, tb,
                   blobmsg_data(msg), blobmsg_data_len(msg));
@@ -406,7 +435,7 @@ service_handle_start_stop_restart_request(
         goto done;
     }
 
-    struct service * const s = services_lookup_service(ctx, service_name);
+    struct service * const s = services_lookup_service(context, service_name);
 
     if (s == NULL)
     {
@@ -448,6 +477,8 @@ service_handle_signal_request(
 {
     struct blob_attr * tb[__SERVICE_SIGNAL_MAX];
     int res;
+    struct serviced_context_st * const context =
+        container_of(ctx, struct serviced_context_st, ubus_connection.context);
 
     blobmsg_parse(service_signal_policy, __SERVICE_SIGNAL_MAX, tb,
                   blobmsg_data(msg), blobmsg_data_len(msg));
@@ -463,7 +494,7 @@ service_handle_signal_request(
         goto done;
     }
 
-    struct service * const s = services_lookup_service(ctx, service_name);
+    struct service * const s = services_lookup_service(context, service_name);
 
     if (s == NULL)
     {
