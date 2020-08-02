@@ -12,9 +12,11 @@ CFLAGS += -I$(CURDIR)
 LIBS=-lubus -lubox -ljson-c -lblobmsg_json
 
 OBJS = \
+	early_start.o\
 	file_monitor.o\
 	iterate_files.o\
 	log.o\
+	service.o\
 	serviced.o\
 	serviced_ubus.o\
 	string_constants.o\

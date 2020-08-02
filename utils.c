@@ -121,3 +121,12 @@ done:
     return success;
 }
 
+int
+send_signal_to_process(
+    struct uloop_process const * const process, unsigned const sig)
+{
+    debug("Send signal %d to PID %d\n", sig, (int)process->pid);
+    return kill(process->pid, sig);
+}
+
+
