@@ -17,7 +17,6 @@ OBJS = \
 	log.o\
 	serviced.o\
 	serviced_ubus.o\
-	service.o\
 	string_constants.o\
 	ubus_connection.o\
 	utils.o

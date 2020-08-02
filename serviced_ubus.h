@@ -5,6 +5,14 @@
 
 #include <libubus.h>
 
+typedef enum service_add_error_t {
+    service_add_success,
+    service_add_invalid_argument,
+    service_add_unknown_error
+} service_add_error_t;
+
+typedef void (*services_iterate_cb)(struct service * s, void * user_ctx);
+
 typedef struct serviced_context_st serviced_context_st;
 
 struct serviced_context_st {
@@ -17,8 +25,6 @@ serviced_deinit(serviced_context_st *context);
 
 serviced_context_st *
 serviced_init(char const * early_start_dir, char const * ubus_path);
-
-typedef void (*services_iterate_cb)(struct service * s, void * user_ctx);
 
 void
 services_insert_service(struct serviced_context_st * context, struct service * s);
@@ -85,4 +91,7 @@ service_free(struct service * s);
 
 void
 send_service_event(struct service const * s, char const * event);
+
+service_add_error_t
+service_add(struct serviced_context_st * context, struct blob_attr * msg);
 

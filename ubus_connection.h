@@ -16,6 +16,7 @@ typedef void
 
 struct ubus_connection_ctx_st {
 	char const *path;
+    bool connected;
 	struct ubus_context context;
 	struct uloop_timeout timeout;
 	ubus_connected_cb connected_cb;

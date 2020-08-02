@@ -186,6 +186,11 @@ handle_log_request(
     int res;
     struct blob_attr * tb[__LOG_MAX];
 
+    UNUSED_ARG(ctx);
+    UNUSED_ARG(obj);
+    UNUSED_ARG(req);
+    UNUSED_ARG(method);
+
     blobmsg_parse(log_policy, __LOG_MAX, tb,
                   blobmsg_data(msg), blobmsg_data_len(msg));
 
