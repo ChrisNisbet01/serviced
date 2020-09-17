@@ -97,7 +97,8 @@ run_command(struct blob_attr * command, int const stdout_fd, int const stderr_fd
 
     /* Allow for the NULL terminator. */
     int const argc = blobmsg_array_length(command) + 1;
-    char * * const argv = alloca(sizeof(*argv) * argc);
+    char * * const argv = calloc(argc, sizeof(*argv));
+
     command_array_to_args(command, argv);
 
     debug_print_command_args(argv);
