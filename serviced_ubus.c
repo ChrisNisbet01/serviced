@@ -148,6 +148,8 @@ service_handle_start_request(
         goto done;
     }
 
+    s->last_command_request = command_request_start;
+
     if (!service_start_fresh(s))
     {
         result = UBUS_STATUS_INVALID_ARGUMENT;
@@ -178,12 +180,16 @@ service_handle_stop_request(
         goto done;
     }
 
-    if (!service_stop(s, stop_reason_request))
-    {
-        result = UBUS_STATUS_INVALID_ARGUMENT;
-        goto done;
-    }
+    s->last_command_request = command_request_stop;
 
+    service_stop(s, stop_reason_request);
+
+    /*
+     * Report success whether or not the service was actually running.
+     * Otherwise, what can happen is that a request to stop a service that is
+     * continually restarting would return an error here if the service wasn't
+     * running at the time.
+     */
     result = UBUS_STATUS_OK;
 
 done:
@@ -237,6 +243,8 @@ service_handle_restart_request(
     {
         goto done;
     }
+
+    s->last_command_request = command_request_restart;
 
     if (!service_restart(s))
     {
@@ -611,6 +619,8 @@ dump_service_data(struct service const * const s, struct blob_buf * const b)
 {
     struct service_config const * const config = s->config;
 
+    blobmsg_add_string(
+        b, last_command_, command_request_to_string(s->last_command_request));
     blobmsg_add_u8(b, running_, service_is_running(s));
     if (service_is_running(s))
     {
@@ -822,6 +832,7 @@ service_add(struct serviced_context_st * const context, struct blob_attr * const
     if (blobmsg_get_bool_or_default(tb[SERVICE_ADD_AUTO_START], false))
     {
         /* No need to send a separate 'start' message. Start it right now. */
+        s->last_command_request = command_request_start;
         service_start_fresh(s);
     }
 

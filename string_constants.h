@@ -36,6 +36,8 @@ extern char const reload_signal_[];
 extern char const terminate_timeout_millisecs_[];
 extern char const auto_start_[];
 
+extern char const last_command_[];
+
 extern char const running_[];
 extern char const log_stdout_[];
 extern char const log_stderr_[];

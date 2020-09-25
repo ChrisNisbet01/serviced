@@ -36,6 +36,8 @@ char const reload_signal_[] = "reload_signal";
 char const terminate_timeout_millisecs_[] = "terminate_timeout_millisecs";
 char const auto_start_[] = "auto_start";
 
+char const last_command_[] = "last_command";
+
 char const running_[] = "running";
 char const log_stdout_[] = "log_stdout";
 char const log_stderr_[] = "log_stderr";

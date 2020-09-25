@@ -42,6 +42,13 @@ typedef enum {
     stop_reason_request
 } stop_reason_t;
 
+typedef enum {
+    command_request_stop,
+    command_request_start,
+    command_request_restart,
+    command_request_COUNT
+} command_request_t;
+
 typedef struct serviced_context_st serviced_context_st;
 
 struct service
@@ -51,7 +58,7 @@ struct service
     const char * name;
 
     serviced_context_st * context;
-
+    command_request_t last_command_request;
     stop_reason_t stop_reason;
 
     struct timespec start_timestamp;
@@ -76,6 +83,9 @@ struct serviced_context_st {
     struct ubus_connection_ctx_st ubus_connection;
     struct avl_tree services;
 };
+
+char const *
+command_request_to_string(command_request_t const command_request);
 
 void
 services_insert_service(struct serviced_context_st * context, struct service * s);
@@ -142,7 +152,7 @@ timer_is_running(struct uloop_timeout const * timer);
 int
 service_send_signal(struct service const * s, unsigned sig);
 
-bool
+void
 service_stop(struct service * s, stop_reason_t stop_reason);
 
 void

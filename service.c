@@ -363,6 +363,23 @@ reload_process_has_exited(struct uloop_process * p, int exit_code)
 #endif
 }
 
+char const *
+command_request_to_string(command_request_t const command_request)
+{
+    char const * command_names[command_request_COUNT] =
+    {
+        [command_request_stop] = stop_,
+        [command_request_start] = start_,
+        [command_request_restart] = restart_
+    };
+    char const * command_name =
+        command_request < command_request_COUNT
+        ? command_names[command_request]
+        : "unknown";
+
+    return command_name;
+}
+
 void
 reload_command_run(struct service * const s)
 {
@@ -866,11 +883,9 @@ done:
     return res;
 }
 
-bool
+void
 service_stop(struct service * const s, stop_reason_t const stop_reason)
 {
-    bool success;
-
     if (service_is_running(s))
     {
         s->stop_reason = stop_reason;
@@ -879,18 +894,17 @@ service_stop(struct service * const s, stop_reason_t const stop_reason)
             send_service_event(s, service_stopping_);
             stop_running_process(s, stop_reason);
         }
-        success = true;
     }
     else
     {
         /*
-         * Return an error so the caller can identify if the service was
-         * running or not when the stop request was received.
+         * The restart timer might be running. Stop it if it is because
+         * this stop request should take precedence.
          */
-        success = false;
+        uloop_timeout_cancel(&s->restart_state.delay_timeout);
     }
 
-    return success;
+    return;
 }
 
 void
