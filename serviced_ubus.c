@@ -734,6 +734,72 @@ service_handle_dump_request(
     return UBUS_STATUS_OK;
 }
 
+enum {
+    OUTPUT_LOG_NAME,
+    OUTPUT_LOG_FILE,
+    OUTPUT_LOG_ENABLE,
+    __OUTPUT_LOG_MAX,
+};
+
+static const struct blobmsg_policy output_log_policy[__OUTPUT_LOG_MAX] = {
+    [OUTPUT_LOG_NAME] = { name_, BLOBMSG_TYPE_STRING },
+    [OUTPUT_LOG_FILE] = { file_, BLOBMSG_TYPE_STRING },
+    [OUTPUT_LOG_ENABLE] = { enable_, BLOBMSG_TYPE_BOOL },
+};
+
+static int
+service_handle_output_log_request(
+    struct ubus_context * const ctx,
+    struct ubus_object * const obj,
+    struct ubus_request_data * const req,
+    char const * const method,
+    struct blob_attr * const msg)
+{
+    int res;
+    struct blob_attr * tb[__OUTPUT_LOG_MAX];
+    struct serviced_context_st * const context =
+        container_of(ctx, struct serviced_context_st, ubus_connection.context);
+
+    blobmsg_parse(output_log_policy, __OUTPUT_LOG_MAX, tb,
+                  blobmsg_data(msg), blobmsg_data_len(msg));
+
+    char const * const service_name =
+        blobmsg_get_string(tb[OUTPUT_LOG_NAME]);
+
+    if (service_name == NULL)
+    {
+        res = UBUS_STATUS_INVALID_ARGUMENT;
+        goto done;
+    }
+
+    char const * const filename =
+        blobmsg_get_string(tb[OUTPUT_LOG_FILE]);
+
+    if (filename == NULL)
+    {
+        res = UBUS_STATUS_INVALID_ARGUMENT;
+        goto done;
+    }
+
+    /* If no enable field is present, assume they want to start logging. */
+    bool const enable = blobmsg_get_bool_or_default(tb[OUTPUT_LOG_ENABLE], true);
+
+    struct service * const s = services_lookup_service(context, service_name);
+
+    if (s == NULL)
+    {
+        debug("Service %s not found\n", service_name);
+        res = UBUS_STATUS_NOT_FOUND;
+        goto done;
+    }
+
+    service_process_logging_request(s, filename, enable);
+    res = UBUS_STATUS_OK;
+
+done:
+    return res;
+}
+
 static void
 config_file_timeout(void * const user_ctx)
 {
@@ -852,6 +918,7 @@ static struct ubus_method main_object_methods[] = {
     UBUS_METHOD(update_, service_handle_update_request, service_update_policy),
     UBUS_METHOD(signal_, service_handle_signal_request, service_signal_policy),
     UBUS_METHOD(dump_, service_handle_dump_request, service_dump_policy),
+    UBUS_METHOD(output_log_, service_handle_output_log_request, output_log_policy),
 };
 
 static struct ubus_object_type main_object_type =

@@ -39,6 +39,11 @@ char const auto_start_[] = "auto_start";
 char const last_command_[] = "last_command";
 
 char const running_[] = "running";
+
+char const output_log_[] = "output_log";
+char const file_[] = "file";
+char const enable_[] = "enable";
+
 char const log_stdout_[] = "log_stdout";
 char const log_stderr_[] = "log_stderr";
 char const pid_[] = "pid";

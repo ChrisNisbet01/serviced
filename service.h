@@ -51,6 +51,18 @@ typedef enum {
 
 typedef struct serviced_context_st serviced_context_st;
 
+struct log_file_entry_st
+{
+    char const * filename;
+    FILE * fp;
+};
+struct logging_st
+{
+    size_t num_used; /* The number of open files. */
+    size_t size; /* The total number of entries. */
+    struct log_file_entry_st * entries;
+};
+
 struct service
 {
     struct avl_node avl;
@@ -70,6 +82,9 @@ struct service
     struct uloop_timeout timeout;
     struct ustream_fd stdout;
     struct ustream_fd stderr;
+
+    struct logging_st logging;
+
     struct file_monitor_st * config_file_monitor;
 
     struct service_config const * config; /* The current config. */
@@ -163,4 +178,8 @@ serviced_deinit(serviced_context_st *context);
 
 serviced_context_st *
 serviced_init(char const * early_start_dir, char const * ubus_path);
+
+void
+service_process_logging_request(
+    struct service * const s, char const * const filename, bool const enable);
 

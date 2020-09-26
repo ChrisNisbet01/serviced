@@ -413,40 +413,56 @@ done:
 }
 
 static void
-stderr_reader(struct ustream * const s, int const bytes)
+write_to_log_files(
+    struct logging_st * const logging, char const * const buf, int const len)
 {
-    do
+    for (size_t i = 0; i < logging->num_used; i++)
     {
-        int len;
-        char const * const buf = ustream_get_read_buf(s, &len);
+        struct log_file_entry_st * const entry = &logging->entries[i];
 
-        if (buf == NULL)
+        if (entry->fp != NULL)
         {
-            break;
+            if (fwrite(buf, 1, len, entry->fp) != len)
+            {
+                fclose(entry->fp);
+                entry->fp = NULL;
+            }
         }
-
-        debug("%s", buf);
-        /* Log it? */
-        ustream_consume(s, len);
-    } while (1);
+    }
 }
 
 static void
-stdout_reader(struct ustream * const s, int const bytes)
+stderr_reader(struct ustream * const stream, int const bytes)
 {
-    do
-    {
-        int len;
-        char const * const buf = ustream_get_read_buf(s, &len);
+    struct service * const s =
+        container_of(stream, struct service, stderr.stream);
+    int len;
+    char const * const buf = ustream_get_read_buf(stream, &len);
 
-        if (buf == NULL)
-        {
-            break;
-        }
+    if (buf != NULL && len >= 0)
+    {
         debug("%s", buf);
-        /* Log it? */
-        ustream_consume(s, len);
-    } while (1);
+        write_to_log_files(&s->logging , buf, len);
+
+        ustream_consume(stream, len);
+    }
+}
+
+static void
+stdout_reader(struct ustream * const stream, int const bytes)
+{
+    struct service * const s =
+        container_of(stream, struct service, stdout.stream);
+    int len;
+    char const * const buf = ustream_get_read_buf(stream, &len);
+
+    if (buf != NULL && len >= 0)
+    {
+        debug("%s", buf);
+        write_to_log_files(&s->logging , buf, len);
+
+        ustream_consume(stream, len);
+    }
 }
 
 static void
@@ -591,6 +607,136 @@ service_start_fresh(struct service * const s)
     return service_start(s);
 }
 
+static void close_log_files(struct logging_st * const logging)
+{
+    for (size_t i = 0; i < logging->num_used; i++)
+    {
+        struct log_file_entry_st * const entry = &logging->entries[i];
+
+        if (entry->fp != NULL)
+        {
+            fclose(entry->fp);
+        }
+        free(UNCONST(entry->filename));
+    }
+    free(logging->entries);
+}
+
+static void
+service_process_logging_disable_request(
+    struct service * const s, char const * const filename)
+{
+    struct logging_st * logging = &s->logging;
+    size_t i;
+
+    for (i = 0; i < logging->num_used; i++)
+    {
+        struct log_file_entry_st * const entry = &logging->entries[i];
+
+        if (entry->filename != NULL && strcmp(entry->filename, filename) == 0)
+        {
+            if (entry->fp != NULL)
+            {
+                fclose(entry->fp);
+                entry->fp = NULL;
+            }
+            free(UNCONST(entry->filename));
+            entry->filename = NULL;
+            break;
+        }
+    }
+
+    if (i < logging->num_used)
+    {
+        /* Shift the subsequent entries down, leaving the space at the end. */
+        i++;
+        for (; i < logging->num_used; i++)
+        {
+            struct log_file_entry_st * const previous_entry =
+                &logging->entries[i - 1];
+            struct log_file_entry_st * const entry =
+                &logging->entries[i];
+
+            previous_entry->filename = entry->filename;
+            entry->filename = NULL;
+            previous_entry->fp = entry->fp;
+            entry->fp = NULL;
+        }
+        logging->num_used--;
+    }
+}
+
+static void
+service_process_logging_enable_request(
+    struct service * const s, char const * const filename)
+{
+    /*
+     * When processing a request to enable logging, first close any existing
+     * log to this filename because there may have been some issue with writing
+     * to the file.
+     */
+    service_process_logging_disable_request(s, filename);
+    /* At this point the file isn't being logged. */
+    struct logging_st * logging = &s->logging;
+
+    if (logging->num_used == logging->size)
+    {
+        size_t new_count = logging->size + 1;
+        struct log_file_entry_st * const new_entries =
+            calloc(sizeof *new_entries, new_count);
+
+        if (new_entries == NULL)
+        {
+            goto done;
+        }
+        if (logging->entries != NULL)
+        {
+            memcpy(new_entries,
+                   logging->entries,
+                   sizeof(*logging->entries) * logging->size);
+        }
+        free(logging->entries);
+        logging->entries = new_entries;
+        logging->size++;
+    }
+
+    struct log_file_entry_st * const entry =
+        &logging->entries[logging->num_used];
+
+    memset(entry, 0, sizeof *entry);
+    entry->filename = strdup(filename);
+    if (entry->filename == NULL)
+    {
+        goto done;
+    }
+    entry->fp = fopen(entry->filename, "a");
+    if (entry->fp == NULL)
+    {
+        free(UNCONST(entry->filename));
+        entry->filename = NULL;
+        goto done;
+    }
+    setvbuf(entry->fp, NULL, _IONBF, 0);
+    logging->num_used++;
+
+done:
+    return;
+}
+
+void
+service_process_logging_request(
+    struct service * const s, char const * const filename, bool const enable)
+{
+    if (!enable)
+    {
+        service_process_logging_disable_request(s, filename);
+    }
+    else
+    {
+        service_process_logging_enable_request(s, filename);
+    }
+}
+
 void
 service_free(struct service * const s)
 {
@@ -613,6 +759,8 @@ service_free(struct service * const s)
     uloop_timeout_cancel(&s->restart_state.delay_timeout);
     config_free(s->config);
     config_free(s->next_config);
+
+    close_log_files(&s->logging);
 
     free(s);
 
