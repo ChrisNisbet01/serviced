@@ -2,3 +2,4 @@
 *.o
 /serviced
 !early.d
+/build/

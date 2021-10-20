@@ -27,6 +27,10 @@ service_handle_add_request(
     char const * const method,
     struct blob_attr * const msg)
 {
+    UNUSED_ARG(obj);
+    UNUSED_ARG(req);
+    UNUSED_ARG(method);
+
     struct serviced_context_st * const context =
         container_of(ctx, struct serviced_context_st, ubus_connection.context);
     service_add_error_t const add_result = service_add(context, msg);
@@ -108,6 +112,10 @@ service_handle_delete_request(
     char const * const method,
     struct blob_attr * const msg)
 {
+    UNUSED_ARG(obj);
+    UNUSED_ARG(req);
+    UNUSED_ARG(method);
+
     struct serviced_context_st * const context =
         container_of(ctx, struct serviced_context_st, ubus_connection.context);
     struct service * s;
@@ -138,6 +146,10 @@ service_handle_start_request(
     char const * const method,
     struct blob_attr * const msg)
 {
+    UNUSED_ARG(obj);
+    UNUSED_ARG(req);
+    UNUSED_ARG(method);
+
     struct serviced_context_st * const context =
         container_of(ctx, struct serviced_context_st, ubus_connection.context);
     struct service * s;
@@ -170,6 +182,10 @@ service_handle_stop_request(
     char const * const method,
     struct blob_attr * const msg)
 {
+    UNUSED_ARG(obj);
+    UNUSED_ARG(req);
+    UNUSED_ARG(method);
+
     struct serviced_context_st * const context =
         container_of(ctx, struct serviced_context_st, ubus_connection.context);
     struct service * s;
@@ -204,6 +220,10 @@ service_handle_reload_request(
     char const * const method,
     struct blob_attr * const msg)
 {
+    UNUSED_ARG(obj);
+    UNUSED_ARG(req);
+    UNUSED_ARG(method);
+
     struct serviced_context_st * const context =
         container_of(ctx, struct serviced_context_st, ubus_connection.context);
     struct service * s;
@@ -234,6 +254,10 @@ service_handle_restart_request(
     char const * const method,
     struct blob_attr * const msg)
 {
+    UNUSED_ARG(obj);
+    UNUSED_ARG(req);
+    UNUSED_ARG(method);
+
     struct serviced_context_st * const context =
         container_of(ctx, struct serviced_context_st, ubus_connection.context);
     struct service * s;
@@ -522,6 +546,10 @@ service_handle_update_request(
     char const * const method,
     struct blob_attr * const msg)
 {
+    UNUSED_ARG(obj);
+    UNUSED_ARG(req);
+    UNUSED_ARG(method);
+
     struct serviced_context_st * const context =
         container_of(ctx, struct serviced_context_st, ubus_connection.context);
     struct service * s;
@@ -563,6 +591,10 @@ service_handle_signal_request(
     char const * const method,
     struct blob_attr * const msg)
 {
+    UNUSED_ARG(obj);
+    UNUSED_ARG(req);
+    UNUSED_ARG(method);
+
     struct blob_attr * tb[__SERVICE_SIGNAL_MAX];
     int res;
     struct serviced_context_st * const context =
@@ -719,6 +751,9 @@ service_handle_dump_request(
     char const * const method,
     struct blob_attr * const msg)
 {
+    UNUSED_ARG(obj);
+    UNUSED_ARG(method);
+
     struct blob_attr * tb[__SERVICE_DUMP_MAX];
 
     blobmsg_parse(service_dump_policy, __SERVICE_DUMP_MAX, tb,
@@ -755,6 +790,10 @@ service_handle_output_log_request(
     char const * const method,
     struct blob_attr * const msg)
 {
+    UNUSED_ARG(obj);
+    UNUSED_ARG(req);
+    UNUSED_ARG(method);
+
     int res;
     struct blob_attr * tb[__OUTPUT_LOG_MAX];
     struct serviced_context_st * const context =
@@ -952,6 +991,7 @@ ubus_connected(struct ubus_connection_ctx_st * const connection_context)
     struct ubus_context * const ubus_ctx = &connection_context->context;
 
     debug("connected\n");
+
     connection_context->connected = true;
     ubus_init_service(ubus_ctx);
     ubus_init_log(ubus_ctx);

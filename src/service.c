@@ -351,7 +351,7 @@ service_has_exited(struct uloop_process * p, int exit_code)
 }
 
 static void
-reload_process_has_exited(struct uloop_process * p, int exit_code)
+reload_process_has_exited(struct uloop_process * const p, int const exit_code)
 {
 #if DEBUG != 0
     struct service * const s =
@@ -360,6 +360,9 @@ reload_process_has_exited(struct uloop_process * p, int exit_code)
     debug("Service %s reload process has exited with code: %d\n",
           s->name,
           service_exit_code(exit_code));
+#else
+    UNUSED_ARG(p);
+    UNUSED_ARG(exit_code);
 #endif
 }
 
@@ -414,7 +417,7 @@ done:
 
 static void
 write_to_log_files(
-    struct logging_st * const logging, char const * const buf, int const len)
+    struct logging_st * const logging, char const * const buf, size_t const len)
 {
     for (size_t i = 0; i < logging->num_used; i++)
     {
@@ -434,6 +437,8 @@ write_to_log_files(
 static void
 stderr_reader(struct ustream * const stream, int const bytes)
 {
+    UNUSED_ARG(bytes);
+
     struct service * const s =
         container_of(stream, struct service, stderr.stream);
     int len;
@@ -442,7 +447,7 @@ stderr_reader(struct ustream * const stream, int const bytes)
     if (buf != NULL && len >= 0)
     {
         debug("%s", buf);
-        write_to_log_files(&s->logging , buf, len);
+        write_to_log_files(&s->logging , buf, (size_t)len);
 
         ustream_consume(stream, len);
     }
@@ -451,6 +456,8 @@ stderr_reader(struct ustream * const stream, int const bytes)
 static void
 stdout_reader(struct ustream * const stream, int const bytes)
 {
+    UNUSED_ARG(bytes);
+
     struct service * const s =
         container_of(stream, struct service, stdout.stream);
     int len;
@@ -527,6 +534,8 @@ static bool filenames_match(char const * const a, char const * const b)
 static void
 stop_running_process(struct service * const s, stop_reason_t const stop_reason)
 {
+    UNUSED_ARG(stop_reason);
+
     send_signal_to_process(&s->service_process, SIGTERM);
 
     struct service_config const * const config = s->config;

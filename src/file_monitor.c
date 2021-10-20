@@ -45,6 +45,8 @@ change_timeout(struct uloop_timeout * const t)
 static void
 inotify_cb(struct ustream * const s, int const bytes)
 {
+    UNUSED_ARG(bytes);
+
     struct file_monitor_st * const monitor =
         container_of(s, struct file_monitor_st, stream.stream);
     bool monitored_file_changed = false;
