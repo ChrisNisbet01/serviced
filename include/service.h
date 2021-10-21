@@ -7,6 +7,8 @@
 #include <libubox/avl.h>
 #include <libubox/ustream.h>
 
+#include <sys/queue.h>
+
 struct restart_config_st
 {
     uint32_t delay_millisecs;
@@ -93,6 +95,21 @@ struct service
     /* If not NULL this is the config to apply after the service stops. */
     struct service_config const * next_config;
 };
+
+struct serviced_context_st;
+
+struct debug_fd_st
+{
+    TAILQ_ENTRY(debug_fd_st) entry;
+    struct serviced_context_st * serviced_context;
+    int fds[2];
+    int fd;
+    struct uloop_timeout timeout;
+    struct ustream_fd s;
+};
+
+TAILQ_HEAD(debug_fd_queue_st, debug_fd_st);
+
 struct ubus_state
 {
     bool connected;
@@ -103,6 +120,7 @@ struct serviced_context_st
 {
     struct ubus_state ubus_state;
     struct avl_tree services;
+    struct debug_fd_queue_st debug_fd_queue;
 };
 
 char const *
@@ -188,4 +206,7 @@ serviced_init(char const * early_start_dir, char const * ubus_path);
 void
 service_process_logging_request(
     struct service * const s, char const * const filename, bool const enable);
+
+int
+debug_fd_init(struct serviced_context_st * const context);
 

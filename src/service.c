@@ -17,10 +17,13 @@
 #include <unistd.h>
 
 static void
-restart_state_initialise(struct restart_state_st * const restart)
+initialise_pipe(int * const pipe_fd, bool const will_read_pipe)
 {
-    uloop_timeout_cancel(&restart->delay_timeout);
-    restart->crash_count = 0;
+    if (!will_read_pipe || pipe(pipe_fd) != 0)
+    {
+        pipe_fd[0] = -1;
+        pipe_fd[1] = -1;
+    }
 }
 
 static void
@@ -42,13 +45,114 @@ close_output_streams(struct service * const s)
 }
 
 static void
-initialise_pipe(int * const pipe_fd, bool const will_read_pipe)
+debug_fd_free(struct debug_fd_st * const debug_fd)
 {
-    if (!will_read_pipe || pipe(pipe_fd) != 0)
+    struct serviced_context_st * const context = debug_fd->serviced_context;
+
+    TAILQ_REMOVE(&context->debug_fd_queue, debug_fd, entry);
+    close_output_stream(&debug_fd->s);
+    if (debug_fd->fds[0] > -1)
     {
-        pipe_fd[0] = -1;
-        pipe_fd[1] = -1;
+        close(debug_fd->fds[0]);
     }
+    free(debug_fd);
+}
+
+static void debug_fds_free(struct serviced_context_st * const context)
+{
+    struct debug_fd_st * debug_fd;
+    struct debug_fd_st * tmp;
+
+    TAILQ_FOREACH_SAFE(debug_fd, &context->debug_fd_queue, entry, tmp)
+    {
+        if (debug_fd->s.stream.write_error)
+        {
+            debug_fd_free(debug_fd);
+        }
+    }
+}
+
+static void
+debug_fd_notify_state(struct ustream * const s)
+{
+    struct debug_fd_st * const debug_fd = container_of(s, struct debug_fd_st, s.stream);
+
+    if (s->write_error || s->eof)
+    {
+        debug("Notify state and FD EOF (%d) or error (%d)\n",
+              s->eof, s->write_error);
+
+        debug_fd_free(debug_fd);
+    }
+}
+
+static void
+write_to_debug_apps(
+    struct serviced_context_st * const context,
+    char const * const buf,
+    size_t const len)
+{
+    struct debug_fd_st * debug_fd;
+    struct debug_fd_st * tmp;
+
+    TAILQ_FOREACH_SAFE(debug_fd, &context->debug_fd_queue, entry, tmp)
+    {
+        if (debug_fd->s.stream.write_error)
+        {
+            debug("error writing to FD %d\n", debug_fd->fd);
+
+            debug_fd_free(debug_fd);
+        }
+        else
+        {
+            ustream_write(&debug_fd->s.stream, buf, len, false);
+        }
+    }
+}
+
+int
+debug_fd_init(struct serviced_context_st * const context)
+{
+    int fd;
+    struct debug_fd_st * const debug_fd = calloc(1, sizeof(*debug_fd));
+
+    if (debug_fd == NULL)
+    {
+        fd = -1;
+        goto done;
+    }
+
+    initialise_pipe(debug_fd->fds, true);
+    if (debug_fd->fds[0] == -1)
+    {
+        fd = -1;
+        goto done;
+    }
+
+    debug_fd->serviced_context = context;
+    debug_fd->fd = debug_fd->fds[1];
+    debug_fd->s.stream.notify_state = debug_fd_notify_state;
+    ustream_fd_init(&debug_fd->s, debug_fd->fd);
+
+    TAILQ_INSERT_TAIL(&context->debug_fd_queue, debug_fd, entry);
+
+    /* This is the FD that the requestor will read from. */
+    fd = debug_fd->fds[0];
+
+done:
+    if (fd < 0)
+    {
+        free(debug_fd);
+    }
+
+    return fd;
+}
+
+static void
+restart_state_initialise(struct restart_state_st * const restart)
+{
+    uloop_timeout_cancel(&restart->delay_timeout);
+    restart->crash_count = 0;
 }
 
 static void
@@ -433,8 +537,6 @@ write_to_log_files(
             }
         }
     }
-    /* temp debug write to fds opened by apps. */
-    write_to_debug_apps(buf, len);
 }
 
 static void
@@ -450,7 +552,9 @@ stderr_reader(struct ustream * const stream, int const bytes)
     if (buf != NULL && len >= 0)
     {
         debug("%s", buf);
+        ULOG_INFO("read %s and len %d\n", buf, len);
         write_to_log_files(&s->logging , buf, (size_t)len);
+        write_to_debug_apps(s->context, buf, (size_t)len);
 
         ustream_consume(stream, len);
     }
@@ -469,7 +573,9 @@ stdout_reader(struct ustream * const stream, int const bytes)
     if (buf != NULL && len >= 0)
     {
         debug("%s", buf);
+        ULOG_INFO("read %s and len %d\n", buf, len);
         write_to_log_files(&s->logging , buf, len);
+        write_to_debug_apps(s->context, buf, (size_t)len);
 
         ustream_consume(stream, len);
     }
@@ -1083,6 +1189,8 @@ serviced_deinit(serviced_context_st * const context)
         service_free(s);
     }
 
+    debug_fds_free(context);
+
     ubus_connection_shutdown(&context->ubus_state.ubus_connection);
     free(context);
 
@@ -1101,6 +1209,7 @@ serviced_init(char const * const early_start_dir, char const * const ubus_path)
     }
 
     avl_init(&context->services, avl_strcmp, false, NULL);
+    TAILQ_INIT(&context->debug_fd_queue);
 
     start_early_services(context, early_start_dir);
     serviced_ubus_init(context, ubus_path);

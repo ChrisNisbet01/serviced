@@ -16,6 +16,10 @@ add_compile_options(
   -D_GNU_SOURCE 
 )
 
+if(DEBUG)
+  add_compile_options(-DDEBUG=1)
+endif()
+
 include(GNUInstallDirs)
 
 find_library(BLOBMSG_JSON blobmsg_json CONFIG REQUIRED)
@@ -53,10 +57,6 @@ add_executable(${PROJECT_NAME} ${SOURCES} ${PROJECT_HEADERS})
 add_dependencies(${PROJECT_NAME} 
   ubus_utils
 )
-
-if(${DEBUG})
-  add_compile_options(-DDEBUG=1)
-endif()
 
 target_include_directories(${PROJECT_NAME}
   PRIVATE
