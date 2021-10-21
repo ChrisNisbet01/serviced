@@ -11,10 +11,10 @@ add_compile_options(
   -O3 
   -Wall 
   -Wextra 
+  -Werror
   -g 
   -D_GNU_SOURCE 
 )
-#-Werror
 
 include(GNUInstallDirs)
 

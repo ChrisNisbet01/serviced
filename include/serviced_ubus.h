@@ -15,3 +15,5 @@ serviced_ubus_init(
 service_add_error_t
 service_add(struct serviced_context_st * context, struct blob_attr * msg);
 
+void write_to_debug_apps(char const * const buf, size_t const len);
+

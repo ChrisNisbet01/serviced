@@ -44,6 +44,8 @@ extern char const output_log_[];
 extern char const file_[];
 extern char const enable_[];
 
+extern char const set_debug_fd[];
+
 extern char const log_stdout_[];
 extern char const log_stderr_[];
 extern char const pid_[];

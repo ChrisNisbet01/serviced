@@ -102,7 +102,6 @@ struct ubus_state
 struct serviced_context_st
 {
     struct ubus_state ubus_state;
-    struct ubus_connection_ctx_st ubus_connection;
     struct avl_tree services;
 };
 

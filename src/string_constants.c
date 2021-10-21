@@ -44,6 +44,8 @@ char const output_log_[] = "output_log";
 char const file_[] = "file";
 char const enable_[] = "enable";
 
+char const set_debug_fd[] = "set_debug_fd";
+
 char const log_stdout_[] = "log_stdout";
 char const log_stderr_[] = "log_stderr";
 char const pid_[] = "pid";

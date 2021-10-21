@@ -32,7 +32,7 @@ service_handle_add_request(
     UNUSED_ARG(method);
 
     struct serviced_context_st * const context =
-        container_of(ctx, struct serviced_context_st, ubus_connection.context);
+        container_of(ctx, struct serviced_context_st, ubus_state.ubus_connection.context);
     service_add_error_t const add_result = service_add(context, msg);
 
     int res;
@@ -117,7 +117,7 @@ service_handle_delete_request(
     UNUSED_ARG(method);
 
     struct serviced_context_st * const context =
-        container_of(ctx, struct serviced_context_st, ubus_connection.context);
+        container_of(ctx, struct serviced_context_st, ubus_state.ubus_connection.context);
     struct service * s;
     int result = service_lookup_by_request_msg(context, msg, &s);
 
@@ -151,7 +151,7 @@ service_handle_start_request(
     UNUSED_ARG(method);
 
     struct serviced_context_st * const context =
-        container_of(ctx, struct serviced_context_st, ubus_connection.context);
+        container_of(ctx, struct serviced_context_st, ubus_state.ubus_connection.context);
     struct service * s;
     int result = service_lookup_by_request_msg(context, msg, &s);
 
@@ -187,7 +187,7 @@ service_handle_stop_request(
     UNUSED_ARG(method);
 
     struct serviced_context_st * const context =
-        container_of(ctx, struct serviced_context_st, ubus_connection.context);
+        container_of(ctx, struct serviced_context_st, ubus_state.ubus_connection.context);
     struct service * s;
     int result = service_lookup_by_request_msg(context, msg, &s);
 
@@ -225,7 +225,7 @@ service_handle_reload_request(
     UNUSED_ARG(method);
 
     struct serviced_context_st * const context =
-        container_of(ctx, struct serviced_context_st, ubus_connection.context);
+        container_of(ctx, struct serviced_context_st, ubus_state.ubus_connection.context);
     struct service * s;
     int result = service_lookup_by_request_msg(context, msg, &s);
 
@@ -259,7 +259,7 @@ service_handle_restart_request(
     UNUSED_ARG(method);
 
     struct serviced_context_st * const context =
-        container_of(ctx, struct serviced_context_st, ubus_connection.context);
+        container_of(ctx, struct serviced_context_st, ubus_state.ubus_connection.context);
     struct service * s;
     int result = service_lookup_by_request_msg(context, msg, &s);
 
@@ -551,7 +551,7 @@ service_handle_update_request(
     UNUSED_ARG(method);
 
     struct serviced_context_st * const context =
-        container_of(ctx, struct serviced_context_st, ubus_connection.context);
+        container_of(ctx, struct serviced_context_st, ubus_state.ubus_connection.context);
     struct service * s;
     int result = service_lookup_by_request_msg(context, msg, &s);
 
@@ -598,7 +598,7 @@ service_handle_signal_request(
     struct blob_attr * tb[__SERVICE_SIGNAL_MAX];
     int res;
     struct serviced_context_st * const context =
-        container_of(ctx, struct serviced_context_st, ubus_connection.context);
+        container_of(ctx, struct serviced_context_st, ubus_state.ubus_connection.context);
 
     blobmsg_parse(service_signal_policy, __SERVICE_SIGNAL_MAX, tb,
                   blobmsg_data(msg), blobmsg_data_len(msg));
@@ -797,7 +797,7 @@ service_handle_output_log_request(
     int res;
     struct blob_attr * tb[__OUTPUT_LOG_MAX];
     struct serviced_context_st * const context =
-        container_of(ctx, struct serviced_context_st, ubus_connection.context);
+        container_of(ctx, struct serviced_context_st, ubus_state.ubus_connection.context);
 
     blobmsg_parse(output_log_policy, __OUTPUT_LOG_MAX, tb,
                   blobmsg_data(msg), blobmsg_data_len(msg));
@@ -947,6 +947,117 @@ done:
     return result;
 }
 
+struct debug_fd_st * debug_fds;
+struct debug_fd_st
+{
+    int fd;
+    struct debug_fd_st * next;
+    struct uloop_timeout timeout;
+    struct ustream_fd s;
+};
+
+static void
+remove_debug_fd(struct debug_fd_st * const debug_fd)
+{
+    struct debug_fd_st * * debug_fd_list = &debug_fds;
+
+    while (*debug_fd_list != NULL)
+    {
+        if (*debug_fd_list == debug_fd)
+        {
+            *debug_fd_list = debug_fd->next;
+            break;
+        }
+        debug_fd_list = &(*debug_fd_list)->next;
+    }
+}
+
+static void
+debug_fd_notify_state(struct ustream * const s)
+{
+    struct debug_fd_st * const debug_fd =
+        container_of(s, struct debug_fd_st, s.stream);
+
+    if (s->write_error)
+    {
+        ustream_free(s);
+        close(debug_fd->fd);
+        remove_debug_fd(debug_fd);
+        free(debug_fd);
+    }
+}
+
+static bool
+debug_fd_reply(
+    struct debug_fd_st * const debug_fd,
+    struct ubus_context * const ctx,
+    struct ubus_request_data * req)
+{
+    bool success;
+    int fds[2];
+
+    if (pipe(fds) == -1)
+    {
+        success = false;
+        goto done;
+    }
+
+    debug_fd->fd = fds[1];
+    debug_fd->s.stream.notify_state = debug_fd_notify_state;
+    ustream_fd_init(&debug_fd->s, debug_fd->fd);
+
+    ubus_request_set_fd(ctx, req, fds[0]);
+    ubus_complete_deferred_request(ctx, req, UBUS_STATUS_OK);
+
+    success = true;
+
+done:
+    return success;
+}
+
+static int service_handle_set_debug_fd_request(
+    struct ubus_context * ctx, struct ubus_object * obj,
+    struct ubus_request_data * req, const char * method,
+    struct blob_attr * msg)
+{
+    UNUSED_ARG(obj);
+    UNUSED_ARG(method);
+    UNUSED_ARG(msg);
+
+    int res;
+    struct debug_fd_st * const debug_fd = calloc(1, sizeof(*debug_fd));
+
+    if (debug_fd == NULL)
+    {
+        res = UBUS_STATUS_UNKNOWN_ERROR;
+        goto done;
+    }
+
+    if (!debug_fd_reply(debug_fd, ctx, req))
+    {
+        res = UBUS_STATUS_UNKNOWN_ERROR;
+        goto done;
+    }
+
+    debug_fd->next = debug_fds;
+    debug_fds = debug_fd;
+
+    res = UBUS_STATUS_OK;
+
+done:
+    return res;
+}
+
+void write_to_debug_apps(char const * const buf, size_t const len)
+{
+    for (struct debug_fd_st * debug_fd = debug_fds;
+          debug_fd != NULL;
+          debug_fd = debug_fd->next)
+    {
+        ustream_write(&debug_fd->s.stream, buf, len, false);
+    }
+}
+
 static struct ubus_method main_object_methods[] = {
     UBUS_METHOD(add_, service_handle_add_request, service_add_policy),
     UBUS_METHOD(delete_, service_handle_delete_request, service_generic_policy),
@@ -958,6 +1069,7 @@ static struct ubus_method main_object_methods[] = {
     UBUS_METHOD(signal_, service_handle_signal_request, service_signal_policy),
     UBUS_METHOD(dump_, service_handle_dump_request, service_dump_policy),
     UBUS_METHOD(output_log_, service_handle_output_log_request, output_log_policy),
+    UBUS_METHOD_NOARG(set_debug_fd, service_handle_set_debug_fd_request),
 };
 
 static struct ubus_object_type main_object_type =

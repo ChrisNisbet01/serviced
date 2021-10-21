@@ -433,6 +433,8 @@ write_to_log_files(
             }
         }
     }
+    /* temp debug write to fds opened by apps. */
+    write_to_debug_apps(buf, len);
 }
 
 static void
@@ -582,7 +584,7 @@ services_iterate(
     void * const user_ctx)
 {
     struct serviced_context_st * const context =
-        container_of(ubus, struct serviced_context_st, ubus_connection.context);
+        container_of(ubus, struct serviced_context_st, ubus_state.ubus_connection.context);
     struct service * s;
 
     avl_for_each_element(&context->services, s, avl)
