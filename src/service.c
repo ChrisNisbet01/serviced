@@ -5,6 +5,7 @@
 #include "string_constants.h"
 #include "utils.h"
 
+#include <ubus_utils/ubus_utils.h>
 #include <libubox/avl-cmp.h>
 #include <libubox/blobmsg_json.h>
 #include <libubox/ulog.h>
@@ -990,13 +991,13 @@ send_service_event(struct service const * const s, char const * const event)
     struct blob_buf b;
 
     ULOG_INFO("service: %s event: %s\n", s->name, event);
-    if (!s->context->ubus_connection.connected)
+    if (!s->context->ubus_state.connected)
     {
         goto done;
     }
     blob_buf_full_init(&b, 0);
     blobmsg_add_string(&b, service_, s->name);
-    ubus_send_event(&s->context->ubus_connection.context, event, b.head);
+    ubus_send_event(&s->context->ubus_state.ubus_connection.context, event, b.head);
     blob_buf_free(&b);
 
 done:
@@ -1080,7 +1081,7 @@ serviced_deinit(serviced_context_st * const context)
         service_free(s);
     }
 
-    ubus_connection_shutdown(&context->ubus_connection);
+    ubus_connection_shutdown(&context->ubus_state.ubus_connection);
     free(context);
 
 done:

@@ -4,15 +4,17 @@ set(EXE_NAME serviced)
 
 project(${EXE_NAME} VERSION 1.0.0 DESCRIPTION "service manager (similar to procd)")
 
+option(DEBUG "Include debug output" OFF)
+
 add_compile_options(
    -std=gnu11
   -O3 
   -Wall 
-  -Werror
   -Wextra 
   -g 
   -D_GNU_SOURCE 
 )
+#-Werror
 
 include(GNUInstallDirs)
 
@@ -31,7 +33,6 @@ set(PROJECT_HEADERS
   include/service.h
   include/serviced_ubus.h
   include/string_constants.h
-  include/ubus_connection.h
   include/utils.h
 )
 
@@ -44,24 +45,26 @@ SET(SOURCES
   src/serviced.c
   src/serviced_ubus.c
   src/string_constants.c
-  src/ubus_connection.c
   src/utils.c
 )
 
 add_executable(${PROJECT_NAME} ${SOURCES} ${PROJECT_HEADERS})
 
-#add_dependencies(${PROJECT_NAME} 
-#  ubus_utils
-#)
+add_dependencies(${PROJECT_NAME} 
+  ubus_utils
+)
+
+if(${DEBUG})
+  add_compile_options(-DDEBUG=1)
+endif()
 
 target_include_directories(${PROJECT_NAME}
   PRIVATE
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
-#    $<BUILD_INTERFACE:${lib_led_INCLUDE_DIR}>
 )
 
 target_link_libraries(${PROJECT_NAME}
-#  ubus_utils
+  ubus_utils
   ${BLOBMSG_JSON}
   ${UBOX}
   ${JSON_C}

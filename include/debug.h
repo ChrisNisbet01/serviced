@@ -1,6 +1,6 @@
 #pragma once
 
-#if DEBUG
+#if DEBUG != 0
 
 #include <libubox/ulog.h>
 

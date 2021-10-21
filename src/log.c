@@ -1,7 +1,7 @@
 #include "log.h"
 #include "string_constants.h"
-#include "utils.h"
 
+#include <ubus_utils/ubus_utils.h>
 #include <libubox/blobmsg_json.h>
 #include <libubox/ulog.h>
 

@@ -2,8 +2,8 @@
 #include "debug.h"
 #include "iterate_files.h"
 #include "serviced_ubus.h"
-#include "utils.h"
 
+#include <ubus_utils/ubus_utils.h>
 #include <json-c/json.h>
 #include <libubox/blobmsg_json.h>
 

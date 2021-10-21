@@ -1,8 +1,8 @@
 #pragma once
 
 #include "file_monitor.h"
-#include "ubus_connection.h"
 
+#include <ubus_utils/ubus_connection.h>
 #include <libubus.h>
 #include <libubox/avl.h>
 #include <libubox/ustream.h>
@@ -93,8 +93,15 @@ struct service
     /* If not NULL this is the config to apply after the service stops. */
     struct service_config const * next_config;
 };
+struct ubus_state
+{
+    bool connected;
+    struct ubus_connection_ctx_st ubus_connection;
+};
 
-struct serviced_context_st {
+struct serviced_context_st
+{
+    struct ubus_state ubus_state;
     struct ubus_connection_ctx_st ubus_connection;
     struct avl_tree services;
 };

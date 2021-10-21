@@ -2,8 +2,8 @@
 #include "debug.h"
 #include "log.h"
 #include "string_constants.h"
-#include "utils.h"
 
+#include <ubus_utils/ubus_utils.h>
 #include <libubox/blobmsg_json.h>
 #include <libubox/ulog.h>
 
@@ -979,9 +979,11 @@ static void
 ubus_reconnected(struct ubus_connection_ctx_st * const connection_context)
 {
     struct ubus_context * const ubus_ctx = &connection_context->context;
+    struct ubus_state * const ubus_state =
+        container_of(connection_context, struct ubus_state, ubus_connection);
 
     debug("reconnected\n");
-    connection_context->connected = true;
+    ubus_state->connected = true;
     ubus_add_uloop(ubus_ctx);
 }
 
@@ -989,10 +991,12 @@ static void
 ubus_connected(struct ubus_connection_ctx_st * const connection_context)
 {
     struct ubus_context * const ubus_ctx = &connection_context->context;
+    struct ubus_state * const ubus_state =
+        container_of(connection_context, struct ubus_state, ubus_connection);
 
     debug("connected\n");
 
-    connection_context->connected = true;
+    ubus_state->connected = true;
     ubus_init_service(ubus_ctx);
     ubus_init_log(ubus_ctx);
     ubus_add_uloop(ubus_ctx);
@@ -1001,8 +1005,12 @@ ubus_connected(struct ubus_connection_ctx_st * const connection_context)
 static void
 ubus_disconnected(struct ubus_connection_ctx_st * const connection_context)
 {
+    struct ubus_state * const ubus_state =
+        container_of(connection_context, struct ubus_state, ubus_connection);
+
     debug("ubus disconnected\n");
-    connection_context->connected = false;
+
+    ubus_state->connected = false;
 }
 
 void
@@ -1010,7 +1018,7 @@ serviced_ubus_init(
     struct serviced_context_st * const context, char const * const ubus_path)
 {
     ubus_connection_init(
-        &context->ubus_connection,
+        &context->ubus_state.ubus_connection,
         ubus_path,
         ubus_connected,
         ubus_reconnected,
