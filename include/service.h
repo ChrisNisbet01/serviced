@@ -103,7 +103,6 @@ struct debug_fd_st
     TAILQ_ENTRY(debug_fd_st) entry;
     struct serviced_context_st * serviced_context;
     int fds[2];
-    int fd;
     struct uloop_timeout timeout;
     struct ustream_fd s;
 };

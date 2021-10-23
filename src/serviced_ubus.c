@@ -36,6 +36,7 @@ service_handle_add_request(
     service_add_error_t const add_result = service_add(context, msg);
 
     int res;
+
     switch (add_result)
     {
         case service_add_success:
@@ -970,8 +971,17 @@ static int service_handle_set_debug_fd_request(
         goto done;
     }
 
-    ubus_request_set_fd(ctx, req, debug_fd);
-    ubus_complete_deferred_request(ctx, req, UBUS_STATUS_OK);
+    /*
+     * This is all a bit odd. The response to the caller must use a different
+     * request than the one that was supplied (else ubus disconnects the daemon).
+     * To make this work, defer this request and respond to the caller with
+     * the new_req set up when the request was deferred.
+     */
+    struct ubus_request_data new_req;
+
+    ubus_defer_request(ctx, req, &new_req);
+    ubus_request_set_fd(ctx, &new_req, debug_fd);
+    ubus_complete_deferred_request(ctx, &new_req, UBUS_STATUS_OK);
 
     res = UBUS_STATUS_OK;
 

@@ -51,10 +51,6 @@ debug_fd_free(struct debug_fd_st * const debug_fd)
 
     TAILQ_REMOVE(&context->debug_fd_queue, debug_fd, entry);
     close_output_stream(&debug_fd->s);
-    if (debug_fd->fds[0] > -1)
-    {
-        close(debug_fd->fds[0]);
-    }
     free(debug_fd);
 }
 
@@ -99,7 +95,7 @@ write_to_debug_apps(
     {
         if (debug_fd->s.stream.write_error)
         {
-            debug("error writing to FD %d\n", debug_fd->fd);
+            debug("error writing to debug FD %d\n", debug_fd->fds[1]);
 
             debug_fd_free(debug_fd);
         }
@@ -123,21 +119,22 @@ debug_fd_init(struct serviced_context_st * const context)
     }
 
     initialise_pipe(debug_fd->fds, true);
-    if (debug_fd->fds[0] == -1)
+    /*
+     * This is the FD that the requestor will read from. Note that this fd will
+     * be closed after it is sent back in the ubus response, so there is no
+     * need to close it again when this debug_fd is cleaned up.
+     */
+    fd = debug_fd->fds[0];
+    if (fd == -1)
     {
-        fd = -1;
         goto done;
     }
 
     debug_fd->serviced_context = context;
-    debug_fd->fd = debug_fd->fds[1];
     debug_fd->s.stream.notify_state = debug_fd_notify_state;
-    ustream_fd_init(&debug_fd->s, debug_fd->fd);
+    ustream_fd_init(&debug_fd->s, debug_fd->fds[1]);
 
     TAILQ_INSERT_TAIL(&context->debug_fd_queue, debug_fd, entry);
-
-    /* This is the FD that the requestor will read from. */
-    fd = debug_fd->fds[0];
 
 done:
     if (fd < 0)
@@ -1099,10 +1096,21 @@ send_service_event(struct service const * const s, char const * const event)
     struct blob_buf b;
 
     ULOG_INFO("service: %s event: %s\n", s->name, event);
+
+    char * buf;
+    int const buf_len = asprintf(&buf, "service: %s event: %s\n", s->name, event);
+
+    if (buf_len >= 0)
+    {
+        write_to_debug_apps(s->context, buf, (size_t)buf_len);
+        free(buf);
+    }
+
     if (!s->context->ubus_state.connected)
     {
         goto done;
     }
+
     blob_buf_full_init(&b, 0);
     blobmsg_add_string(&b, service_, s->name);
     ubus_send_event(&s->context->ubus_state.ubus_connection.context, event, b.head);
