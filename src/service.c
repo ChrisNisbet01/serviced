@@ -84,9 +84,7 @@ debug_fd_notify_state(struct ustream * const s)
 
 static void
 write_to_debug_apps(
-    struct serviced_context_st * const context,
-    char const * const buf,
-    size_t const len)
+    struct serviced_context_st * const context, char const * const format, ...)
 {
     struct debug_fd_st * debug_fd;
     struct debug_fd_st * tmp;
@@ -101,7 +99,11 @@ write_to_debug_apps(
         }
         else
         {
-            ustream_write(&debug_fd->s.stream, buf, len, false);
+            va_list arg;
+
+            va_start(arg, format);
+            (void)ustream_vprintf(&debug_fd->s.stream, format, arg);
+            va_end(arg);
         }
     }
 }
@@ -132,6 +134,7 @@ debug_fd_init(struct serviced_context_st * const context)
 
     debug_fd->serviced_context = context;
     debug_fd->s.stream.notify_state = debug_fd_notify_state;
+
     ustream_fd_init(&debug_fd->s, debug_fd->fds[1]);
 
     TAILQ_INSERT_TAIL(&context->debug_fd_queue, debug_fd, entry);
@@ -548,10 +551,10 @@ stderr_reader(struct ustream * const stream, int const bytes)
 
     if (buf != NULL && len >= 0)
     {
-        debug("%s", buf);
         ULOG_INFO("read %s and len %d\n", buf, len);
+
         write_to_log_files(&s->logging , buf, (size_t)len);
-        write_to_debug_apps(s->context, buf, (size_t)len);
+        write_to_debug_apps(s->context, buf);
 
         ustream_consume(stream, len);
     }
@@ -569,10 +572,10 @@ stdout_reader(struct ustream * const stream, int const bytes)
 
     if (buf != NULL && len >= 0)
     {
-        debug("%s", buf);
         ULOG_INFO("read %s and len %d\n", buf, len);
-        write_to_log_files(&s->logging , buf, len);
-        write_to_debug_apps(s->context, buf, (size_t)len);
+
+        write_to_log_files(&s->logging , buf, (size_t)len);
+        write_to_debug_apps(s->context, buf);
 
         ustream_consume(stream, len);
     }
@@ -1097,14 +1100,7 @@ send_service_event(struct service const * const s, char const * const event)
 
     ULOG_INFO("service: %s event: %s\n", s->name, event);
 
-    char * buf;
-    int const buf_len = asprintf(&buf, "service: %s event: %s\n", s->name, event);
-
-    if (buf_len >= 0)
-    {
-        write_to_debug_apps(s->context, buf, (size_t)buf_len);
-        free(buf);
-    }
+    write_to_debug_apps(s->context, "service: %s event: %s\n", s->name, event);
 
     if (!s->context->ubus_state.connected)
     {
