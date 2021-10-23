@@ -30,6 +30,7 @@ find_package(ubus_utils REQUIRED)
 
 set(PROJECT_HEADERS
   include/debug.h
+  include/debug_output.h
   include/early_start.h
   include/file_monitor.h
   include/iterate_files.h
@@ -41,6 +42,7 @@ set(PROJECT_HEADERS
 )
 
 SET(SOURCES 
+  src/debug_output.c
   src/early_start.c
   src/file_monitor.c
   src/iterate_files.c

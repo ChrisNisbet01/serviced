@@ -1,13 +1,12 @@
 #pragma once
 
+#include "debug_output.h"
 #include "file_monitor.h"
 
 #include <ubus_utils/ubus_connection.h>
 #include <libubus.h>
 #include <libubox/avl.h>
 #include <libubox/ustream.h>
-
-#include <sys/queue.h>
 
 struct restart_config_st
 {
@@ -98,16 +97,6 @@ struct service
 
 struct serviced_context_st;
 
-struct debug_fd_st
-{
-    TAILQ_ENTRY(debug_fd_st) entry;
-    struct serviced_context_st * serviced_context;
-    int fds[2];
-    struct uloop_timeout timeout;
-    struct ustream_fd s;
-};
-
-TAILQ_HEAD(debug_fd_queue_st, debug_fd_st);
 
 struct ubus_state
 {
@@ -119,7 +108,7 @@ struct serviced_context_st
 {
     struct ubus_state ubus_state;
     struct avl_tree services;
-    struct debug_fd_queue_st debug_fd_queue;
+    debug_output_context_st * debug_output_context;
 };
 
 char const *
@@ -206,6 +195,11 @@ void
 service_process_logging_request(
     struct service * const s, char const * const filename, bool const enable);
 
+/*
+ * Get a file descriptor that the user can read from. This file will contain
+ * the debug output from serviced and also from any applications that serviced
+ * is managing, if that app has monitoring enabled.
+ */
 int
-debug_fd_init(struct serviced_context_st * const context);
+service_debug_output_init(struct serviced_context_st * const context);
 

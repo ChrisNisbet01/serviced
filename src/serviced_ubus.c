@@ -959,11 +959,10 @@ static int service_handle_set_debug_fd_request(
     UNUSED_ARG(method);
     UNUSED_ARG(msg);
 
+    int res;
     struct serviced_context_st * const context =
         container_of(ctx, struct serviced_context_st, ubus_state.ubus_connection.context);
-
-    int res;
-    int const debug_fd = debug_fd_init(context);
+    int const debug_fd = service_debug_output_init(context);
 
     if (debug_fd < 0)
     {

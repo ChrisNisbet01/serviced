@@ -17,135 +17,10 @@
 #include <unistd.h>
 
 static void
-initialise_pipe(int * const pipe_fd, bool const will_read_pipe)
-{
-    if (!will_read_pipe || pipe(pipe_fd) != 0)
-    {
-        pipe_fd[0] = -1;
-        pipe_fd[1] = -1;
-    }
-}
-
-static void
-close_output_stream(struct ustream_fd * const stream)
-{
-    if (stream->fd.fd > -1)
-    {
-        ustream_free(&stream->stream);
-        close(stream->fd.fd);
-        stream->fd.fd = -1;
-    }
-}
-
-static void
 close_output_streams(struct service * const s)
 {
     close_output_stream(&s->stdout);
     close_output_stream(&s->stderr);
-}
-
-static void
-debug_fd_free(struct debug_fd_st * const debug_fd)
-{
-    struct serviced_context_st * const context = debug_fd->serviced_context;
-
-    TAILQ_REMOVE(&context->debug_fd_queue, debug_fd, entry);
-    close_output_stream(&debug_fd->s);
-    free(debug_fd);
-}
-
-static void debug_fds_free(struct serviced_context_st * const context)
-{
-    struct debug_fd_st * debug_fd;
-    struct debug_fd_st * tmp;
-
-    TAILQ_FOREACH_SAFE(debug_fd, &context->debug_fd_queue, entry, tmp)
-    {
-        if (debug_fd->s.stream.write_error)
-        {
-            debug_fd_free(debug_fd);
-        }
-    }
-}
-
-static void
-debug_fd_notify_state(struct ustream * const s)
-{
-    struct debug_fd_st * const debug_fd = container_of(s, struct debug_fd_st, s.stream);
-
-    if (s->write_error || s->eof)
-    {
-        debug("Notify state and FD EOF (%d) or error (%d)\n",
-              s->eof, s->write_error);
-
-        debug_fd_free(debug_fd);
-    }
-}
-
-static void
-write_to_debug_apps(
-    struct serviced_context_st * const context, char const * const format, ...)
-{
-    struct debug_fd_st * debug_fd;
-    struct debug_fd_st * tmp;
-
-    TAILQ_FOREACH_SAFE(debug_fd, &context->debug_fd_queue, entry, tmp)
-    {
-        if (debug_fd->s.stream.write_error)
-        {
-            debug("error writing to debug FD %d\n", debug_fd->fds[1]);
-
-            debug_fd_free(debug_fd);
-        }
-        else
-        {
-            va_list arg;
-
-            va_start(arg, format);
-            (void)ustream_vprintf(&debug_fd->s.stream, format, arg);
-            va_end(arg);
-        }
-    }
-}
-
-int
-debug_fd_init(struct serviced_context_st * const context)
-{
-    int fd;
-    struct debug_fd_st * const debug_fd = calloc(1, sizeof(*debug_fd));
-
-    if (debug_fd == NULL)
-    {
-        fd = -1;
-        goto done;
-    }
-
-    initialise_pipe(debug_fd->fds, true);
-    /*
-     * This is the FD that the requestor will read from. Note that this fd will
-     * be closed after it is sent back in the ubus response, so there is no
-     * need to close it again when this debug_fd is cleaned up.
-     */
-    fd = debug_fd->fds[0];
-    if (fd == -1)
-    {
-        goto done;
-    }
-
-    debug_fd->serviced_context = context;
-    debug_fd->s.stream.notify_state = debug_fd_notify_state;
-
-    ustream_fd_init(&debug_fd->s, debug_fd->fds[1]);
-
-    TAILQ_INSERT_TAIL(&context->debug_fd_queue, debug_fd, entry);
-
-done:
-    if (fd < 0)
-    {
-        free(debug_fd);
-    }
-
-    return fd;
 }
 
 static void
@@ -554,7 +429,7 @@ stderr_reader(struct ustream * const stream, int const bytes)
         ULOG_INFO("read %s and len %d\n", buf, len);
 
         write_to_log_files(&s->logging , buf, (size_t)len);
-        write_to_debug_apps(s->context, buf);
+        debug_output_write_to_debug_apps(s->context->debug_output_context, buf);
 
         ustream_consume(stream, len);
     }
@@ -575,7 +450,7 @@ stdout_reader(struct ustream * const stream, int const bytes)
         ULOG_INFO("read %s and len %d\n", buf, len);
 
         write_to_log_files(&s->logging , buf, (size_t)len);
-        write_to_debug_apps(s->context, buf);
+        debug_output_write_to_debug_apps(s->context->debug_output_context, buf);
 
         ustream_consume(stream, len);
     }
@@ -1100,7 +975,8 @@ send_service_event(struct service const * const s, char const * const event)
 
     ULOG_INFO("service: %s event: %s\n", s->name, event);
 
-    write_to_debug_apps(s->context, "service: %s event: %s\n", s->name, event);
+    debug_output_write_to_debug_apps(
+        s->context->debug_output_context, "service: %s event: %s\n", s->name, event);
 
     if (!s->context->ubus_state.connected)
     {
@@ -1177,6 +1053,12 @@ service_stop(struct service * const s, stop_reason_t const stop_reason)
     return;
 }
 
+int
+service_debug_output_init(struct serviced_context_st * const context)
+{
+    return debug_output_fd_init(context->debug_output_context);
+}
+
 void
 serviced_deinit(serviced_context_st * const context)
 {
@@ -1193,9 +1075,13 @@ serviced_deinit(serviced_context_st * const context)
         service_free(s);
     }
 
-    debug_fds_free(context);
-
     ubus_connection_shutdown(&context->ubus_state.ubus_connection);
+    /*
+     * Leave the debug output until the end so users can see as much debug as
+     * possible.
+     */
+    debug_output_deinit(context->debug_output_context);
+
     free(context);
 
 done:
@@ -1213,7 +1099,8 @@ serviced_init(char const * const early_start_dir, char const * const ubus_path)
     }
 
     avl_init(&context->services, avl_strcmp, false, NULL);
-    TAILQ_INIT(&context->debug_fd_queue);
+
+    context->debug_output_context = debug_output_init();
 
     start_early_services(context, early_start_dir);
     serviced_ubus_init(context, ubus_path);
