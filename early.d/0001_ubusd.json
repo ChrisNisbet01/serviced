@@ -1,0 +1,9 @@
+{
+    "name": "ubusd",
+    "stdout": true,
+    "stderr": true,
+    "auto_start": true,
+    "command": [
+        "/usr/local/sbin/ubusd"
+    ]
+}
