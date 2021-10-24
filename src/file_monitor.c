@@ -1,5 +1,4 @@
 #include "file_monitor.h"
-
 #include "debug.h"
 
 #include <ubus_utils/ubus_utils.h>
@@ -10,7 +9,8 @@
 #include <string.h>
 #include <unistd.h>
 
-struct file_monitor_st {
+struct file_monitor_st
+{
     union
     {
         char buf[sizeof(struct inotify_event)+ NAME_MAX + 1];

@@ -58,7 +58,8 @@ command_array_to_args(struct blob_attr * const command, char * * const argv)
     return argv;
 }
 
-static void debug_print_command_args(char * * const argv)
+static void
+debug_print_command_args(char * * const argv)
 {
     for (char const * parg = argv[0]; parg != NULL; parg++)
     {
@@ -499,7 +500,8 @@ commands_match(struct blob_attr const * const a, struct blob_attr const * const 
     return blob_attr_equal(a, b);
 }
 
-static bool filenames_match(char const * const a, char const * const b)
+static bool
+filenames_match(char const * const a, char const * const b)
 {
     bool match;
 
@@ -600,7 +602,8 @@ service_start_fresh(struct service * const s)
     return service_start(s);
 }
 
-static void close_log_files(struct logging_st * const logging)
+static void
+close_log_files(struct logging_st * const logging)
 {
     for (size_t i = 0; i < logging->num_used; i++)
     {

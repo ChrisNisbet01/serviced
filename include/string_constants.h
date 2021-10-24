@@ -60,3 +60,4 @@ extern char const crash_threshold_secs_[];
 extern char const max_crashes_[];
 extern char const crash_count_[];
 extern char const restart_pending_[];
+

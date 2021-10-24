@@ -170,7 +170,8 @@ enum {
     __LOG_MAX,
 };
 
-static const struct blobmsg_policy log_policy[__LOG_MAX] = {
+static const struct blobmsg_policy log_policy[__LOG_MAX] =
+{
     [LOG_CHANNELS] = { channels_, BLOBMSG_TYPE_ARRAY },
     [LOG_THRESHOLD] = { threshold_, BLOBMSG_TYPE_STRING }
 };
@@ -217,14 +218,16 @@ done:
     return res;
 }
 
-static struct ubus_method log_object_methods[] = {
+static struct ubus_method log_object_methods[] =
+{
     UBUS_METHOD(log_, handle_log_request, log_policy),
 };
 
 static struct ubus_object_type log_object_type =
     UBUS_OBJECT_TYPE(log_, log_object_methods);
 
-static struct ubus_object log_object = {
+static struct ubus_object log_object =
+{
     .name = service_log_,
     .type = &log_object_type,
     .methods = log_object_methods,

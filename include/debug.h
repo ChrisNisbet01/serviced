@@ -10,8 +10,8 @@
 
 #define debug(fmt, ...) \
 do { \
-	ULOG_DEBUG("%s:%d: ", __FILE__, __LINE__); \
-	ULOG_DEBUG(fmt, ## __VA_ARGS__); \
+    ULOG_DEBUG("%s:%d: ", __FILE__, __LINE__); \
+    ULOG_DEBUG(fmt, ## __VA_ARGS__); \
 } while (0)
 
 #else

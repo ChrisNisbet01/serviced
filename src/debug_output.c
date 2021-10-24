@@ -35,7 +35,8 @@ debug_fd_free(struct debug_fd_st * const debug_fd)
     free(debug_fd);
 }
 
-static void debug_fds_free(struct debug_output_context_st * const context)
+static void
+debug_fds_free(struct debug_output_context_st * const context)
 {
     struct debug_fd_st * debug_fd;
     struct debug_fd_st * tmp;
@@ -173,3 +174,4 @@ debug_output_init(void)
 done:
     return context;
 }
+

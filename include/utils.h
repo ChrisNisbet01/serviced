@@ -17,7 +17,7 @@ write_pid_file(char const * filename, pid_t pid);
 
 int
 send_signal_to_process(
-    struct uloop_process const * const process, unsigned const sig);
+    struct uloop_process const * process, unsigned const sig);
 
 void
 initialise_pipe(int * pipe_fd, bool will_read_pipe);

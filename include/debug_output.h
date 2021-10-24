@@ -15,5 +15,3 @@ debug_output_deinit(debug_output_context_st * context);
 debug_output_context_st *
 debug_output_init(void);
 
-
-
