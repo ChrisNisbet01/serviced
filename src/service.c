@@ -19,8 +19,8 @@
 static void
 close_output_streams(struct service * const s)
 {
-    close_output_stream(&s->stdout);
-    close_output_stream(&s->stderr);
+    close_output_stream(&s->stdout_stream);
+    close_output_stream(&s->stderr_stream);
 }
 
 static void
@@ -165,13 +165,13 @@ service_start(struct service * const s)
 
     uloop_process_add(&s->service_process);
 
-    assign_output_stream_to_parent(&s->stdout, stdout_pipe);
-    assign_output_stream_to_parent(&s->stderr, stderr_pipe);
+    assign_output_stream_to_parent(&s->stdout_stream, stdout_pipe);
+    assign_output_stream_to_parent(&s->stderr_stream, stderr_pipe);
 
     if (stderr_pipe[0] > -1)
     {
         /* Parent wants to read stderr. */
-        ustream_fd_init(&s->stderr, stderr_pipe[0]);
+        ustream_fd_init(&s->stderr_stream, stderr_pipe[0]);
         fcntl(stderr_pipe[0], F_SETFD, FD_CLOEXEC);
         /* Parent doesn't write to the outputs. */
         close(stderr_pipe[1]);
@@ -421,7 +421,7 @@ stderr_reader(struct ustream * const stream, int const bytes)
     UNUSED_ARG(bytes);
 
     struct service * const s =
-        container_of(stream, struct service, stderr.stream);
+        container_of(stream, struct service, stderr_stream.stream);
     int len;
     char const * const buf = ustream_get_read_buf(stream, &len);
 
@@ -442,7 +442,7 @@ stdout_reader(struct ustream * const stream, int const bytes)
     UNUSED_ARG(bytes);
 
     struct service * const s =
-        container_of(stream, struct service, stdout.stream);
+        container_of(stream, struct service, stdout_stream.stream);
     int len;
     char const * const buf = ustream_get_read_buf(stream, &len);
 
@@ -469,13 +469,13 @@ service_init(struct service * const s, struct serviced_context_st * const contex
     s->reload_process.cb = reload_process_has_exited;
     s->last_exit_code = EXIT_SUCCESS;
 
-    s->stdout.fd.fd = -1;
-    s->stdout.stream.string_data = true;
-    s->stdout.stream.notify_read = stdout_reader;
+    s->stdout_stream.fd.fd = -1;
+    s->stdout_stream.stream.string_data = true;
+    s->stdout_stream.stream.notify_read = stdout_reader;
 
-    s->stderr.fd.fd = -1;
-    s->stderr.stream.string_data = true;
-    s->stderr.stream.notify_read = stderr_reader;
+    s->stderr_stream.fd.fd = -1;
+    s->stderr_stream.stream.string_data = true;
+    s->stderr_stream.stream.notify_read = stderr_reader;
 
     s->config_file_monitor = NULL;
 }

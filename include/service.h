@@ -81,8 +81,8 @@ struct service
     struct uloop_process reload_process;
     struct uloop_process service_process;
     struct uloop_timeout timeout;
-    struct ustream_fd stdout;
-    struct ustream_fd stderr;
+    struct ustream_fd stdout_stream;
+    struct ustream_fd stderr_stream;
 
     struct logging_st logging;
 
