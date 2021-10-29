@@ -8,7 +8,6 @@ char const service_added_[] = "service.added";
 char const service_failed_to_start_[] = "service.failed_to_start";
 char const service_reached_crash_limit_[] = "service.reached_crash_limit";
 char const service_stopping_[] = "service.stopping";
-char const service_[] = "service";
 char const service_log_[] = "service_log";
 char const log_[] = "log";
 char const serviced_[] = "serviced";

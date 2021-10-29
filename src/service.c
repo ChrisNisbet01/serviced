@@ -987,7 +987,7 @@ send_service_event(struct service const * const s, char const * const event)
     }
 
     blob_buf_full_init(&b, 0);
-    blobmsg_add_string(&b, service_, s->name);
+    blobmsg_add_string(&b, serviced_, s->name);
     ubus_send_event(&s->context->ubus_state.ubus_connection.context, event, b.head);
     blob_buf_free(&b);
 

@@ -992,7 +992,7 @@ static int service_handle_set_debug_fd_request(
     ubus_defer_request(ctx, req, &new_req);
     ubus_request_set_fd(ctx, &new_req, debug_fd);
     ubus_complete_deferred_request(ctx, &new_req, UBUS_STATUS_OK);
-
+    fprintf(stderr, "sent response\n");
     res = UBUS_STATUS_OK;
 
 done:
@@ -1015,11 +1015,11 @@ static struct ubus_method main_object_methods[] =
 };
 
 static struct ubus_object_type main_object_type =
-    UBUS_OBJECT_TYPE(service_, main_object_methods);
+    UBUS_OBJECT_TYPE(serviced_, main_object_methods);
 
 static struct ubus_object main_object =
 {
-    .name = service_,
+    .name = serviced_,
     .type = &main_object_type,
     .methods = main_object_methods,
     .n_methods = ARRAY_SIZE(main_object_methods),

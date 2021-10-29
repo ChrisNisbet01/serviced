@@ -8,7 +8,6 @@ extern char const service_added_[];
 extern char const service_failed_to_start_[];
 extern char const service_reached_crash_limit_[];
 extern char const service_stopping_[];
-extern char const service_[];
 extern char const service_log_[];
 extern char const log_[];
 extern char const serviced_[];
