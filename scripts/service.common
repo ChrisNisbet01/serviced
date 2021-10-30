@@ -1,0 +1,66 @@
+#!/bin/sh
+
+. /etc/test/service_helpers.sh
+
+initscript=$1
+action=${2:-help}
+shift 2
+
+help() {
+	cat <<EOF
+Syntax: $initscript [command]
+
+Available commands:
+	add     Add the service
+	start	Start the service
+	stop	Stop the service
+	delete	delete the service
+EOF
+}
+
+# Add some defaults in case the service doesn't implement these methods.
+
+add_service() 
+{
+	:
+}
+
+stop_service() 
+{
+	:
+}
+
+start_service() 
+{
+	:
+}
+
+delete_service() 
+{
+	:
+}
+
+. "${initscript}"
+
+add() {
+	add_service "$@"
+}
+
+start() {
+	start_service "$@"
+}
+
+stop() {
+	stop_service "$@"
+}
+
+delete() {
+	delete_service "$@"
+}
+
+case "$action" in
+	add|start|stop|delete|help)
+		$action "$@"
+	;;
+esac
+
