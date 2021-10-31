@@ -295,6 +295,7 @@ enum {
     SERVICE_CONFIG_TERMTIMEOUT,
     SERVICE_CONFIG_NEW_SESSION,
     SERVICE_CONFIG_RESTART,
+    SERVICE_CONFIG_NICE,
     __SERVICE_CONFIG_MAX,
 };
 
@@ -309,7 +310,8 @@ static const struct blobmsg_policy service_config_policy[__SERVICE_CONFIG_MAX] =
     [SERVICE_CONFIG_RELOADSIG] = { reload_signal_, BLOBMSG_TYPE_INT32 },
     [SERVICE_CONFIG_TERMTIMEOUT] = { terminate_timeout_millisecs_, BLOBMSG_TYPE_INT32 },
     [SERVICE_CONFIG_NEW_SESSION] = { new_session_, BLOBMSG_TYPE_BOOL },
-    [SERVICE_CONFIG_RESTART] = { restart_config_, BLOBMSG_TYPE_TABLE }
+    [SERVICE_CONFIG_RESTART] = { restart_config_, BLOBMSG_TYPE_TABLE },
+    [SERVICE_CONFIG_NICE] = { nice_, BLOBMSG_TYPE_INT32 }
 };
 
 static struct blob_attr *
@@ -432,6 +434,7 @@ parse_config(struct blob_attr * const msg)
         blobmsg_get_bool_or_default(tb[SERVICE_CONFIG_STDERR], false);
     config->create_new_session =
         blobmsg_get_bool_or_default(tb[SERVICE_CONFIG_NEW_SESSION], false);
+    config->nice = blobmsg_get_u32_or_default(tb[SERVICE_CONFIG_NICE], 0);
 
     parse_restart(&config->restart, tb[SERVICE_CONFIG_RESTART]);
 
@@ -689,6 +692,7 @@ dump_service_data(struct service const * const s, struct blob_buf * const b)
     blobmsg_add_u8(b, log_stdout_, config->log_stdout);
     blobmsg_add_u8(b, log_stderr_, config->log_stderr);
     blobmsg_add_u8(b, new_session_, config->create_new_session);
+    blobmsg_add_u32(b, nice_, config->nice);
     if (config->pid_filename != NULL)
     {
         blobmsg_add_string(b, pid_file_, config->pid_filename);

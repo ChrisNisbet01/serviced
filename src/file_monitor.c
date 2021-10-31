@@ -140,12 +140,12 @@ done:
 void
 file_monitor_close(struct file_monitor_st * const monitor)
 {
-    debug("%s\n", __func__);
-
     if (monitor == NULL)
     {
         goto done;
     }
+
+    debug("%s\n", __func__);
 
     uloop_timeout_cancel(&monitor->change_timeout);
 

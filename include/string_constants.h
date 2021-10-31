@@ -54,6 +54,7 @@ extern char const last_exit_code_[];
 extern char const new_session_[];
 
 extern char const restart_config_[];
+extern char const nice_[];
 extern char const delay_millisecs_[];
 extern char const crash_threshold_secs_[];
 extern char const max_crashes_[];

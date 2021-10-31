@@ -100,6 +100,17 @@ service_run(struct service * const s, int const stdout_fd, int const stderr_fd)
         setsid();
     }
 
+    if (config->nice != 0)
+    {
+        errno = 0;
+        if (nice(config->nice) == -1 && errno != 0)
+        {
+            debug("Failed to set 'nice' value for: %s (%s)\n",
+                  s->name,
+                  strerror(errno));
+        }
+    }
+
     run_command(config->command, stdout_fd, stderr_fd);
 }
 
@@ -839,6 +850,11 @@ configs_match(
         goto done;
     }
     if (a->create_new_session != b->create_new_session)
+    {
+        match = false;
+        goto done;
+    }
+    if (a->nice != b->nice)
     {
         match = false;
         goto done;

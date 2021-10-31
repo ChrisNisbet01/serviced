@@ -30,6 +30,7 @@ struct service_config
     bool log_stdout; /* Read stdout rather than direct it to /dev/null. */
     bool log_stderr; /* Read stderr rather than direct it to /dev/null. */
     bool create_new_session; /* Make the service a session leader. */
+    int nice;
     int reload_signal; /* The signal to use to request a config reload. */
     struct blob_attr * reload_command; /* The command and args to specify when reloading the service. */
 
